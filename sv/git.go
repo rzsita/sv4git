@@ -28,7 +28,8 @@ type Git interface {
 	Tags() ([]GitTag, error)
 	Branch() string
 	IsDetached() (bool, error)
-	LastCommitForFile(filePath string) (string, error)
+	LastComponentTag(componentPath string) string
+	TagForComponent(version semver.Version, componentPath string) (string, error)
 }
 
 // GitCommitLog description of a single commit log.
@@ -191,15 +192,35 @@ func (GitImpl) IsDetached() (bool, error) {
 	return false, nil
 }
 
-// LastCommitForFile returns the hash of the most recent commit that touched filePath.
-// Returns an empty string (not an error) when the file has no commit history.
-func (GitImpl) LastCommitForFile(filePath string) (string, error) {
-	cmd := exec.Command("git", "log", "--format=%H", "-n", "1", "--", filePath)
+// LastComponentTag returns the most recent Go-style monorepo tag for the given
+// component path (e.g. "templates/my-component/v1.2.3").
+// Returns an empty string when no tag exists for the component.
+func (GitImpl) LastComponentTag(componentPath string) string {
+	filter := componentPath + "/v*"
+	cmd := exec.Command("git", "for-each-ref", "refs/tags/"+filter, "--sort", "-creatordate", "--format", "%(refname:short)", "--count", "1")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return "", combinedOutputErr(err, out)
+		return ""
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(string(out))
+}
+
+// TagForComponent creates and pushes an annotated git tag for a monorepo component
+// following the Go standard format: <componentPath>/vX.Y.Z.
+func (GitImpl) TagForComponent(version semver.Version, componentPath string) (string, error) {
+	tag := fmt.Sprintf("%s/v%d.%d.%d", componentPath, version.Major(), version.Minor(), version.Patch())
+	tagMsg := fmt.Sprintf("%s version %d.%d.%d", componentPath, version.Major(), version.Minor(), version.Patch())
+
+	tagCommand := exec.Command("git", "tag", "-a", tag, "-m", tagMsg)
+	if out, err := tagCommand.CombinedOutput(); err != nil {
+		return tag, combinedOutputErr(err, out)
+	}
+
+	pushCommand := exec.Command("git", "push", "origin", tag)
+	if out, err := pushCommand.CombinedOutput(); err != nil {
+		return tag, combinedOutputErr(err, out)
+	}
+	return tag, nil
 }
 
 func parseTagsOutput(input string) ([]GitTag, error) {

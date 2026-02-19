@@ -581,7 +581,16 @@ func monorepoTagHandler(
 			if uerr := monorepoProcessor.UpdateVersion(component, *nextVer, cfg.Monorepo); uerr != nil {
 				return fmt.Errorf("error updating version for %s: %v", component.Name, uerr)
 			}
-			fmt.Printf("%s: %s\n", component.Name, nextVer.String())
+
+			relDir, rerr := filepath.Rel(repoPath, component.RootPath)
+			if rerr != nil {
+				return fmt.Errorf("error resolving path for %s: %v", component.Name, rerr)
+			}
+			tagName, terr := git.TagForComponent(*nextVer, relDir)
+			if terr != nil {
+				return fmt.Errorf("error creating tag for %s: %v", component.Name, terr)
+			}
+			fmt.Printf("%s: %s\n", component.Name, tagName)
 		}
 		return nil
 	}
@@ -634,28 +643,14 @@ func monorepoChangelogHandler(
 }
 
 // componentCommits returns commits that touched the component's directory since the
-// last commit that modified its versioning file (the "version baseline").
-// Falls back to all directory commits when the versioning file has no commit history.
+// last Go-style component tag (e.g. "templates/my-component/v1.2.3").
+// Falls back to all directory commits when no component tag exists yet (first run).
 func componentCommits(git sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
 	relDir, err := filepath.Rel(repoPath, component.RootPath)
 	if err != nil {
 		return nil, err
 	}
-	relFile, err := filepath.Rel(repoPath, component.VersioningFilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	baselineHash, err := git.LastCommitForFile(relFile)
-	if err != nil {
-		return nil, fmt.Errorf("error finding baseline commit for %s: %v", component.Name, err)
-	}
-
-	var lr sv.LogRange
-	if baselineHash != "" {
-		lr = sv.NewLogRangeWithPaths(sv.HashRange, baselineHash, "", []string{relDir})
-	} else {
-		lr = sv.NewLogRangeWithPaths(sv.TagRange, "", "", []string{relDir})
-	}
+	lastTag := git.LastComponentTag(relDir)
+	lr := sv.NewLogRangeWithPaths(sv.TagRange, lastTag, "", []string{relDir})
 	return git.Log(lr)
 }

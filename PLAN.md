@@ -40,23 +40,40 @@ The `path` value follows jq/yq syntax, parsed by a dedicated `parsePath()` funct
 
 Both `"` and `'` are accepted as the bracket quote character. The leading `.` is optional. `parsePath()` returns an error on malformed input (unclosed brackets, missing quotes, empty path), so misconfiguration fails fast at startup.
 
-### 3. Determining "commits since last version bump"
+### 3. Monorepo git tag format — Go standard
 
-There are no per-component git tags. Instead, use the last commit that modified the versioning file itself as the baseline:
+Monorepo component tags follow the [Go module spec](https://go.dev/ref/mod#vcs-version) for multi-module repositories:
 
 ```
-git log <last-commit-that-touched-versioning-file>..HEAD -- <component-dir>/
+<component-relative-path>/vX.Y.Z
 ```
 
-- Run `git log --format=%H -n 1 -- <versioning-file>` to find that baseline commit.
-- Then `git log <hash>..HEAD -- <component-dir>/` for unreleased commits.
-- If no baseline exists (first run), fall back to all commits touching the directory.
+**Example**: component at `templates/my-component/` with version `1.2.3` → tag `templates/my-component/v1.2.3`
 
-### 4. File reading/writing strategy
+This convention is the most widely adopted standard, used by all major Go tooling. It avoids tag collisions between components because each tag is scoped by its directory path prefix.
+
+The `mtg` command:
+1. Computes the next version for each changed component.
+2. Updates the versioning file on disk.
+3. Creates an annotated git tag (`git tag -a <path>/vX.Y.Z`) and pushes it to origin.
+
+### 4. Determining "commits since last version bump"
+
+Use the most recent Go-style component tag as the version baseline:
+
+```
+git log <last-component-tag>..HEAD -- <component-dir>/
+```
+
+- Run `git for-each-ref refs/tags/<componentPath>/v* --sort -creatordate --count 1` to find the baseline.
+- Then `git log <tag>..HEAD -- <component-dir>/` for unreleased commits.
+- If no tag exists (first run), fall back to all commits touching the directory (`git log -- <component-dir>/`).
+
+### 5. File reading/writing strategy
 
 Parse YAML/JSON into `map[string]interface{}`, navigate with the path algorithm, mutate, then marshal back. This is simple and correct; it will lose YAML comments in the versioning file (acceptable trade-off for v1).
 
-### 5. No changes to existing commands
+### 6. No changes to existing commands
 
 The `monorepo` feature is purely additive. Existing `tag`, `next-version`, etc. are unchanged.
 
