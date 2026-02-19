@@ -88,7 +88,11 @@ func readVersionFromFile(filePath, dotPath string) (*semver.Version, error) {
 	if err != nil {
 		return nil, err
 	}
-	raw, err := getByPath(data, strings.Split(dotPath, "."))
+	segments, err := parsePath(dotPath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path %q: %v", dotPath, err)
+	}
+	raw, err := getByPath(data, segments)
 	if err != nil {
 		return nil, fmt.Errorf("path %q: %v", dotPath, err)
 	}
@@ -112,7 +116,11 @@ func writeVersionToFile(filePath, dotPath, version string) error {
 	if err != nil {
 		return err
 	}
-	if err := setByPath(data, strings.Split(dotPath, "."), version); err != nil {
+	segments, err := parsePath(dotPath)
+	if err != nil {
+		return fmt.Errorf("invalid path %q: %v", dotPath, err)
+	}
+	if err := setByPath(data, segments, version); err != nil {
 		return fmt.Errorf("path %q: %v", dotPath, err)
 	}
 	return marshalToFile(filePath, data)
@@ -154,12 +162,91 @@ func marshalToFile(filePath string, data map[string]interface{}) error {
 	return os.WriteFile(filePath, out, 0644)
 }
 
-// ---- dot-path navigation ----
+// ---- path parsing and navigation ----
 
-// getByPath navigates a nested map[string]interface{} using dot-separated segments,
-// treating each segment as an exact key name. Keys that contain dots must be
-// placed in a single config path segment; the dot character is exclusively a
-// path separator here.
+// parsePath parses a jq/yq-style path expression into key segments.
+//
+// Supported formats:
+//
+//	metadata.version                                  → ["metadata", "version"]
+//	.metadata.version                                 → ["metadata", "version"]  (leading dot optional)
+//	.metadata.annotations["backstage.io/my-key"]     → ["metadata", "annotations", "backstage.io/my-key"]
+//	metadata["key.with.dots"].nested                  → ["metadata", "key.with.dots", "nested"]
+//
+// Inside bracket notation ["..."] or ['...'] the content is treated as a literal
+// key name, allowing dots and other special characters.
+func parsePath(path string) ([]string, error) {
+	if path == "" {
+		return nil, fmt.Errorf("empty path")
+	}
+
+	var segments []string
+	var current strings.Builder
+	i := 0
+
+	// Strip optional leading dot (jq style).
+	if path[0] == '.' {
+		i = 1
+	}
+
+	for i < len(path) {
+		switch path[i] {
+		case '.':
+			if current.Len() > 0 {
+				segments = append(segments, current.String())
+				current.Reset()
+			}
+			i++
+
+		case '[':
+			if current.Len() > 0 {
+				segments = append(segments, current.String())
+				current.Reset()
+			}
+			i++ // skip '['
+			if i >= len(path) {
+				return nil, fmt.Errorf("unexpected end of path after '['")
+			}
+			quote := path[i]
+			if quote != '"' && quote != '\'' {
+				return nil, fmt.Errorf("expected quote character after '[', got %q", string(quote))
+			}
+			i++ // skip opening quote
+			for i < len(path) && path[i] != quote {
+				current.WriteByte(path[i])
+				i++
+			}
+			if i >= len(path) {
+				return nil, fmt.Errorf("unclosed string in bracket notation")
+			}
+			i++ // skip closing quote
+			if i >= len(path) || path[i] != ']' {
+				return nil, fmt.Errorf("expected ']' to close bracket notation")
+			}
+			i++ // skip ']'
+			segments = append(segments, current.String())
+			current.Reset()
+			// Skip optional trailing dot after ']'.
+			if i < len(path) && path[i] == '.' {
+				i++
+			}
+
+		default:
+			current.WriteByte(path[i])
+			i++
+		}
+	}
+
+	if current.Len() > 0 {
+		segments = append(segments, current.String())
+	}
+	if len(segments) == 0 {
+		return nil, fmt.Errorf("path %q contains no segments", path)
+	}
+	return segments, nil
+}
+
+// getByPath navigates a nested map[string]interface{} using pre-parsed key segments.
 func getByPath(data map[string]interface{}, segments []string) (interface{}, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("empty path")

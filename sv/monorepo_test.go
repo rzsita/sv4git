@@ -6,6 +6,98 @@ import (
 	"testing"
 )
 
+// ---- parsePath tests ----
+
+func TestParsePath(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		path    string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "simple key",
+			path: "version",
+			want: []string{"version"},
+		},
+		{
+			name: "nested dot notation",
+			path: "metadata.version",
+			want: []string{"metadata", "version"},
+		},
+		{
+			name: "leading dot (jq style)",
+			path: ".metadata.version",
+			want: []string{"metadata", "version"},
+		},
+		{
+			name: "bracket notation double quotes",
+			path: `metadata["key.with.dots"]`,
+			want: []string{"metadata", "key.with.dots"},
+		},
+		{
+			name: "bracket notation single quotes",
+			path: `metadata['key.with.dots']`,
+			want: []string{"metadata", "key.with.dots"},
+		},
+		{
+			name: "backstage jq-style path",
+			path: `.metadata.annotations["backstage.io/template-version"]`,
+			want: []string{"metadata", "annotations", "backstage.io/template-version"},
+		},
+		{
+			name: "bracket followed by dot then field",
+			path: `metadata["section"].version`,
+			want: []string{"metadata", "section", "version"},
+		},
+		{
+			name:    "empty path",
+			path:    "",
+			wantErr: true,
+		},
+		{
+			name:    "unclosed bracket",
+			path:    `metadata["key`,
+			wantErr: true,
+		},
+		{
+			name:    "missing quote after bracket",
+			path:    "metadata[key]",
+			wantErr: true,
+		},
+		{
+			name:    "missing closing bracket",
+			path:    `metadata["key"`,
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := parsePath(tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("parsePath() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			if len(got) != len(tt.want) {
+				t.Errorf("parsePath() = %v, want %v", got, tt.want)
+				return
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("parsePath() segment[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
 // ---- getByPath tests ----
 
 func TestGetByPath(t *testing.T) {
@@ -159,6 +251,13 @@ func TestReadVersionFromFile(t *testing.T) {
 			content: "metadata:\n  version: 2.0.0\n",
 			dotPath: "metadata.version",
 			want:    "2.0.0",
+		},
+		{
+			name:    "backstage yaml with bracket notation",
+			ext:     ".yml",
+			content: "metadata:\n  annotations:\n    backstage.io/template-version: 3.1.4\n",
+			dotPath: `.metadata.annotations["backstage.io/template-version"]`,
+			want:    "3.1.4",
 		},
 		{
 			name:    "simple json",

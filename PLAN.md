@@ -9,7 +9,7 @@ Add a `monorepo` config section to `.sv4git.yml` that enables per-component sema
 ```yaml
 monorepo:
   versioning-file: templates/*/template.yml   # glob relative to repo root
-  path: metadata.annotations.backstage.io/template-version  # dot-separated key path into the file
+  path: '.metadata.annotations["backstage.io/template-version"]'  # jq/yq-style key path
 ```
 
 ### New CLI commands
@@ -28,9 +28,17 @@ monorepo:
 
 `filepath.Glob` only supports single `*` (not `**`). The example pattern `templates/*/template.yml` uses only a single `*`, so `filepath.Glob` covers the stated requirement. Deep double-star patterns can be documented as a future improvement.
 
-### 2. Dot-path navigation for YAML/JSON keys
+### 2. Path notation — jq/yq style
 
-The `path` value uses `.` exclusively as a path separator. Each segment is used as an exact key name — no special handling for keys that contain dots. Keys with dots must not appear in the path string (the user is responsible for configuring a path that uses plain keys at each level).
+The `path` value follows jq/yq syntax, parsed by a dedicated `parsePath()` function in `sv/monorepo.go`:
+
+| Notation | Example | When to use |
+|---|---|---|
+| Dot | `.metadata.version` | Plain keys (no special chars) |
+| Bracket | `.metadata["key.with.dots"]` | Keys containing `.` or other special characters |
+| Mixed | `.metadata.annotations["backstage.io/template-version"]` | Nested mix |
+
+Both `"` and `'` are accepted as the bracket quote character. The leading `.` is optional. `parsePath()` returns an error on malformed input (unclosed brackets, missing quotes, empty path), so misconfiguration fails fast at startup.
 
 ### 3. Determining "commits since last version bump"
 
