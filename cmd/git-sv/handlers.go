@@ -596,6 +596,40 @@ func monorepoTagHandler(
 	}
 }
 
+func monorepoUpdateVersionHandler(
+	git sv.Git,
+	semverProcessor sv.SemVerCommitsProcessor,
+	monorepoProcessor sv.MonorepoProcessor,
+	cfg Config,
+	repoPath string,
+) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		components, err := monorepoProcessor.FindComponents(repoPath, cfg.Monorepo)
+		if err != nil {
+			return fmt.Errorf("error finding monorepo components: %v", err)
+		}
+
+		for _, component := range components {
+			commits, cerr := componentCommits(git, repoPath, component)
+			if cerr != nil {
+				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
+			}
+
+			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			if !updated {
+				fmt.Printf("%s: no version change (current: %s)\n", component.Name, component.CurrentVersion.String())
+				continue
+			}
+
+			if uerr := monorepoProcessor.UpdateVersion(component, *nextVer, cfg.Monorepo); uerr != nil {
+				return fmt.Errorf("error updating version for %s: %v", component.Name, uerr)
+			}
+			fmt.Printf("%s: %s written to %s\n", component.Name, nextVer.String(), component.VersioningFilePath)
+		}
+		return nil
+	}
+}
+
 func monorepoChangelogHandler(
 	git sv.Git,
 	semverProcessor sv.SemVerCommitsProcessor,

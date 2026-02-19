@@ -336,3 +336,96 @@ func Test_monorepoChangelogHandler_FindComponentsError(t *testing.T) {
 		t.Error("monorepoChangelogHandler() expected error when FindComponents fails, got nil")
 	}
 }
+
+// ---- monorepoUpdateVersionHandler tests ----
+
+func Test_monorepoUpdateVersionHandler_SkipsNoUpdate(t *testing.T) {
+	comp := makeComponent(t, "zeta", "1.0.0")
+
+	updateCalled := false
+	git := mockGit{
+		lastComponentTagFn: func(string) string { return "" },
+		logFn:              func(sv.LogRange) ([]sv.GitCommitLog, error) { return nil, nil },
+	}
+	mnrp := mockMonorepoProcessor{
+		findComponentsFn: func(string, sv.MonorepoConfig) ([]sv.MonorepoComponent, error) {
+			return []sv.MonorepoComponent{comp}, nil
+		},
+		nextVersionFn: func(component sv.MonorepoComponent, _ []sv.GitCommitLog, _ sv.SemVerCommitsProcessor) (*semver.Version, bool) {
+			return component.CurrentVersion, false
+		},
+		updateVersionFn: func(_ sv.MonorepoComponent, _ semver.Version, _ sv.MonorepoConfig) error {
+			updateCalled = true
+			return nil
+		},
+	}
+
+	handler := monorepoUpdateVersionHandler(git, mockSemVerProcessor{}, mnrp, Config{}, comp.RootPath)
+	if err := handler(newCLICtx()); err != nil {
+		t.Fatalf("monorepoUpdateVersionHandler() unexpected error: %v", err)
+	}
+	if updateCalled {
+		t.Error("monorepoUpdateVersionHandler() called UpdateVersion for a component with no changes")
+	}
+}
+
+func Test_monorepoUpdateVersionHandler_WritesVersion(t *testing.T) {
+	repoRoot := t.TempDir()
+	comp := makeComponent(t, "eta", "2.0.0")
+	comp.RootPath = filepath.Join(repoRoot, "eta")
+	if err := os.MkdirAll(comp.RootPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	nextVer := semver.MustParse("2.1.0")
+	var updatedVersion semver.Version
+	tagCalled := false
+
+	git := mockGit{
+		lastComponentTagFn: func(string) string { return "" },
+		logFn:              func(sv.LogRange) ([]sv.GitCommitLog, error) { return []sv.GitCommitLog{{Hash: "abc"}}, nil },
+		tagForComponentFn: func(version semver.Version, _ string) (string, error) {
+			tagCalled = true
+			return "", nil
+		},
+	}
+	mnrp := mockMonorepoProcessor{
+		findComponentsFn: func(string, sv.MonorepoConfig) ([]sv.MonorepoComponent, error) {
+			return []sv.MonorepoComponent{comp}, nil
+		},
+		nextVersionFn: func(_ sv.MonorepoComponent, _ []sv.GitCommitLog, _ sv.SemVerCommitsProcessor) (*semver.Version, bool) {
+			return nextVer, true
+		},
+		updateVersionFn: func(_ sv.MonorepoComponent, version semver.Version, _ sv.MonorepoConfig) error {
+			updatedVersion = version
+			return nil
+		},
+	}
+
+	handler := monorepoUpdateVersionHandler(git, mockSemVerProcessor{}, mnrp, Config{}, repoRoot)
+	if err := handler(newCLICtx()); err != nil {
+		t.Fatalf("monorepoUpdateVersionHandler() unexpected error: %v", err)
+	}
+	if updatedVersion.String() != "2.1.0" {
+		t.Errorf("UpdateVersion called with %s, want 2.1.0", updatedVersion.String())
+	}
+	if tagCalled {
+		t.Error("monorepoUpdateVersionHandler() must not call TagForComponent")
+	}
+}
+
+func Test_monorepoUpdateVersionHandler_FindComponentsError(t *testing.T) {
+	git := mockGit{
+		lastComponentTagFn: func(string) string { return "" },
+		logFn:              func(sv.LogRange) ([]sv.GitCommitLog, error) { return nil, nil },
+	}
+	mnrp := mockMonorepoProcessor{
+		findComponentsFn: func(string, sv.MonorepoConfig) ([]sv.MonorepoComponent, error) {
+			return nil, os.ErrPermission
+		},
+	}
+	handler := monorepoUpdateVersionHandler(git, mockSemVerProcessor{}, mnrp, Config{}, t.TempDir())
+	if err := handler(newCLICtx()); err == nil {
+		t.Error("monorepoUpdateVersionHandler() expected error when FindComponents fails, got nil")
+	}
+}

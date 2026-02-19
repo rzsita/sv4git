@@ -173,6 +173,12 @@ func main() {
 			Action:  monorepoTagHandler(git, semverProcessor, monorepoProcessor, cfg, repoPath),
 		},
 		{
+			Name:    "monorepo-bump",
+			Aliases: []string{"mbu"},
+			Usage:   "bump version files for all changed components in a monorepo without tagging or committing",
+			Action:  monorepoUpdateVersionHandler(git, semverProcessor, monorepoProcessor, cfg, repoPath),
+		},
+		{
 			Name:    "monorepo-changelog",
 			Aliases: []string{"mcgl"},
 			Usage:   "generate and write CHANGELOG.md for each component in a monorepo",
