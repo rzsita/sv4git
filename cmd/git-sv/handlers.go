@@ -587,6 +587,52 @@ func monorepoTagHandler(
 	}
 }
 
+func monorepoChangelogHandler(
+	git sv.Git,
+	semverProcessor sv.SemVerCommitsProcessor,
+	monorepoProcessor sv.MonorepoProcessor,
+	rnProcessor sv.ReleaseNoteProcessor,
+	outputFormatter sv.OutputFormatter,
+	cfg Config,
+	repoPath string,
+) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		components, err := monorepoProcessor.FindComponents(repoPath, cfg.Monorepo)
+		if err != nil {
+			return fmt.Errorf("error finding monorepo components: %v", err)
+		}
+
+		for _, component := range components {
+			commits, cerr := componentCommits(git, repoPath, component)
+			if cerr != nil {
+				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
+			}
+
+			nextVer, _ := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+
+			var date time.Time
+			if len(commits) > 0 {
+				date, _ = time.Parse("2006-01-02", commits[0].Date)
+			} else {
+				date = time.Now()
+			}
+
+			releaseNote := rnProcessor.Create(nextVer, "", date, commits)
+			output, ferr := outputFormatter.FormatChangelog([]sv.ReleaseNote{releaseNote})
+			if ferr != nil {
+				return fmt.Errorf("could not format changelog for %s: %v", component.Name, ferr)
+			}
+
+			changelogPath := filepath.Join(component.RootPath, "CHANGELOG.md")
+			if werr := os.WriteFile(changelogPath, []byte(output), 0644); werr != nil {
+				return fmt.Errorf("could not write changelog for %s: %v", component.Name, werr)
+			}
+			fmt.Printf("%s: changelog written to %s\n", component.Name, changelogPath)
+		}
+		return nil
+	}
+}
+
 // componentCommits returns commits that touched the component's directory since the
 // last commit that modified its versioning file (the "version baseline").
 // Falls back to all directory commits when the versioning file has no commit history.

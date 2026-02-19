@@ -32,18 +32,6 @@ func TestGetByPath(t *testing.T) {
 			want:     "2.0.0",
 		},
 		{
-			name: "key with dot via greedy match",
-			data: map[string]interface{}{
-				"metadata": map[string]interface{}{
-					"annotations": map[string]interface{}{
-						"backstage.io/template-version": "3.1.0",
-					},
-				},
-			},
-			segments: []string{"metadata", "annotations", "backstage", "io/template-version"},
-			want:     "3.1.0",
-		},
-		{
 			name:     "empty segments",
 			data:     map[string]interface{}{},
 			segments: []string{},
@@ -110,17 +98,6 @@ func TestSetByPath(t *testing.T) {
 			wantVal:  "1.1.0",
 		},
 		{
-			name: "key with dot via greedy match",
-			data: map[string]interface{}{
-				"annotations": map[string]interface{}{
-					"backstage.io/template-version": "0.0.1",
-				},
-			},
-			segments: []string{"annotations", "backstage", "io/template-version"},
-			value:    "1.0.0",
-			wantVal:  "1.0.0",
-		},
-		{
 			name:     "empty segments",
 			data:     map[string]interface{}{},
 			segments: []string{},
@@ -182,13 +159,6 @@ func TestReadVersionFromFile(t *testing.T) {
 			content: "metadata:\n  version: 2.0.0\n",
 			dotPath: "metadata.version",
 			want:    "2.0.0",
-		},
-		{
-			name:    "backstage yaml with dot key",
-			ext:     ".yml",
-			content: "metadata:\n  annotations:\n    backstage.io/template-version: 3.1.4\n",
-			dotPath: "metadata.annotations.backstage.io/template-version",
-			want:    "3.1.4",
 		},
 		{
 			name:    "simple json",

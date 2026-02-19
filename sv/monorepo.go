@@ -156,56 +156,47 @@ func marshalToFile(filePath string, data map[string]interface{}) error {
 
 // ---- dot-path navigation ----
 
-// getByPath navigates a nested map[string]interface{} using dot-separated segments.
-// It uses greedy longest-prefix matching so keys that themselves contain dots
-// (e.g. "backstage.io/template-version") resolve correctly without escaping.
-//
-// Example: segments ["metadata", "annotations", "backstage", "io/template-version"]
-// will try key "metadata.annotations.backstage.io/template-version" first, then
-// progressively shorter prefixes until "metadata" matches and recursion continues.
+// getByPath navigates a nested map[string]interface{} using dot-separated segments,
+// treating each segment as an exact key name. Keys that contain dots must be
+// placed in a single config path segment; the dot character is exclusively a
+// path separator here.
 func getByPath(data map[string]interface{}, segments []string) (interface{}, error) {
 	if len(segments) == 0 {
 		return nil, fmt.Errorf("empty path")
 	}
-	for i := len(segments); i > 0; i-- {
-		key := strings.Join(segments[:i], ".")
-		val, ok := data[key]
-		if !ok {
-			continue
-		}
-		if i == len(segments) {
-			// All segments consumed — this is the target value.
-			return val, nil
-		}
-		nested, ok := val.(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("value at %q is not a map", key)
-		}
-		return getByPath(nested, segments[i:])
+	val, ok := data[segments[0]]
+	if !ok {
+		return nil, fmt.Errorf("key %q not found", segments[0])
 	}
-	return nil, fmt.Errorf("key %q not found", strings.Join(segments, "."))
+	if len(segments) == 1 {
+		return val, nil
+	}
+	nested, ok := val.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("value at %q is not a map", segments[0])
+	}
+	return getByPath(nested, segments[1:])
 }
 
-// setByPath sets a value in a nested map[string]interface{} using the same greedy strategy.
+// setByPath sets a value in a nested map[string]interface{} using dot-separated segments.
 func setByPath(data map[string]interface{}, segments []string, value string) error {
 	if len(segments) == 0 {
 		return fmt.Errorf("empty path")
 	}
-	for i := len(segments); i > 0; i-- {
-		key := strings.Join(segments[:i], ".")
-		val, ok := data[key]
-		if !ok {
-			continue
+	if len(segments) == 1 {
+		if _, ok := data[segments[0]]; !ok {
+			return fmt.Errorf("key %q not found", segments[0])
 		}
-		if i == len(segments) {
-			data[key] = value
-			return nil
-		}
-		nested, ok := val.(map[string]interface{})
-		if !ok {
-			return fmt.Errorf("value at %q is not a map", key)
-		}
-		return setByPath(nested, segments[i:], value)
+		data[segments[0]] = value
+		return nil
 	}
-	return fmt.Errorf("key %q not found", strings.Join(segments, "."))
+	val, ok := data[segments[0]]
+	if !ok {
+		return fmt.Errorf("key %q not found", segments[0])
+	}
+	nested, ok := val.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("value at %q is not a map", segments[0])
+	}
+	return setByPath(nested, segments[1:], value)
 }

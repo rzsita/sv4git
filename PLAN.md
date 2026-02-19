@@ -18,6 +18,7 @@ monorepo:
 |---|---|---|
 | `monorepo-next-version` | `mnv` | Print next version for each changed component |
 | `monorepo-tag` | `mtg` | Update version files for all changed components |
+| `monorepo-changelog` | `mcgl` | Write `CHANGELOG.md` into each component's directory |
 
 ---
 
@@ -29,13 +30,7 @@ monorepo:
 
 ### 2. Dot-path navigation for YAML/JSON keys
 
-The `path` value uses `.` as separator. YAML keys may themselves contain `.` (e.g., `backstage.io/template-version`). A **greedy longest-prefix** algorithm resolves ambiguity:
-
-When navigating `annotations` with remaining segments `["backstage", "io/template-version"]`:
-- Try `i=2`: key = `"backstage.io/template-version"` → found → return value ✓
-- Try `i=1`: key = `"backstage"` → only if above fails
-
-This correctly handles Backstage-style YAML keys that contain dots without any escaping.
+The `path` value uses `.` exclusively as a path separator. Each segment is used as an exact key name — no special handling for keys that contain dots. Keys with dots must not appear in the path string (the user is responsible for configuring a path that uses plain keys at each level).
 
 ### 3. Determining "commits since last version bump"
 
@@ -68,8 +63,8 @@ The `monorepo` feature is purely additive. Existing `tag`, `next-version`, etc. 
 | `sv/config.go` | Add `MonorepoConfig` struct |
 | `sv/git.go` | Add `paths []string` to `LogRange`; add `NewLogRangeWithPaths()`; extend `Log()` to append `-- <paths>`; add `LastCommitForFile()` to `Git` interface and `GitImpl` |
 | `cmd/git-sv/config.go` | Add `Monorepo sv.MonorepoConfig \`yaml:"monorepo"\`` field to `Config` |
-| `cmd/git-sv/handlers.go` | Add `monorepoNextVersionHandler()` and `monorepoTagHandler()` |
-| `cmd/git-sv/main.go` | Instantiate `sv.NewMonorepoProcessor()`; register two new commands |
+| `cmd/git-sv/handlers.go` | Add `monorepoNextVersionHandler()`, `monorepoTagHandler()`, and `monorepoChangelogHandler()` |
+| `cmd/git-sv/main.go` | Instantiate `sv.NewMonorepoProcessor()`; register three new commands |
 
 ### New files
 

@@ -172,6 +172,12 @@ func main() {
 			Usage:   "update version files for all changed components in a monorepo",
 			Action:  monorepoTagHandler(git, semverProcessor, monorepoProcessor, cfg, repoPath),
 		},
+		{
+			Name:    "monorepo-changelog",
+			Aliases: []string{"mcgl"},
+			Usage:   "generate and write CHANGELOG.md for each component in a monorepo",
+			Action:  monorepoChangelogHandler(git, semverProcessor, monorepoProcessor, releasenotesProcessor, outputFormatter, cfg, repoPath),
+		},
 	}
 
 	if apperr := app.Run(os.Args); apperr != nil {
