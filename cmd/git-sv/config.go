@@ -36,6 +36,7 @@ type Config struct {
 	ReleaseNotes  sv.ReleaseNotesConfig  `yaml:"release-notes"`
 	Branches      sv.BranchesConfig      `yaml:"branches"`
 	CommitMessage sv.CommitMessageConfig `yaml:"commit-message"`
+	Monorepo      sv.MonorepoConfig      `yaml:"monorepo"`
 }
 
 func getRepoPath() (string, error) {

@@ -523,3 +523,93 @@ func str(value, defaultValue string) string {
 	}
 	return defaultValue
 }
+
+func monorepoNextVersionHandler(
+	git sv.Git,
+	semverProcessor sv.SemVerCommitsProcessor,
+	monorepoProcessor sv.MonorepoProcessor,
+	cfg Config,
+	repoPath string,
+) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		components, err := monorepoProcessor.FindComponents(repoPath, cfg.Monorepo)
+		if err != nil {
+			return fmt.Errorf("error finding monorepo components: %v", err)
+		}
+
+		for _, component := range components {
+			commits, cerr := componentCommits(git, repoPath, component)
+			if cerr != nil {
+				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
+			}
+
+			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			if !updated {
+				nextVer = component.CurrentVersion
+			}
+			fmt.Printf("%s: %s\n", component.Name, nextVer.String())
+		}
+		return nil
+	}
+}
+
+func monorepoTagHandler(
+	git sv.Git,
+	semverProcessor sv.SemVerCommitsProcessor,
+	monorepoProcessor sv.MonorepoProcessor,
+	cfg Config,
+	repoPath string,
+) func(c *cli.Context) error {
+	return func(c *cli.Context) error {
+		components, err := monorepoProcessor.FindComponents(repoPath, cfg.Monorepo)
+		if err != nil {
+			return fmt.Errorf("error finding monorepo components: %v", err)
+		}
+
+		for _, component := range components {
+			commits, cerr := componentCommits(git, repoPath, component)
+			if cerr != nil {
+				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
+			}
+
+			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			if !updated {
+				fmt.Printf("%s: no version change (current: %s)\n", component.Name, component.CurrentVersion.String())
+				continue
+			}
+
+			if uerr := monorepoProcessor.UpdateVersion(component, *nextVer, cfg.Monorepo); uerr != nil {
+				return fmt.Errorf("error updating version for %s: %v", component.Name, uerr)
+			}
+			fmt.Printf("%s: %s\n", component.Name, nextVer.String())
+		}
+		return nil
+	}
+}
+
+// componentCommits returns commits that touched the component's directory since the
+// last commit that modified its versioning file (the "version baseline").
+// Falls back to all directory commits when the versioning file has no commit history.
+func componentCommits(git sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
+	relDir, err := filepath.Rel(repoPath, component.RootPath)
+	if err != nil {
+		return nil, err
+	}
+	relFile, err := filepath.Rel(repoPath, component.VersioningFilePath)
+	if err != nil {
+		return nil, err
+	}
+
+	baselineHash, err := git.LastCommitForFile(relFile)
+	if err != nil {
+		return nil, fmt.Errorf("error finding baseline commit for %s: %v", component.Name, err)
+	}
+
+	var lr sv.LogRange
+	if baselineHash != "" {
+		lr = sv.NewLogRangeWithPaths(sv.HashRange, baselineHash, "", []string{relDir})
+	} else {
+		lr = sv.NewLogRangeWithPaths(sv.TagRange, "", "", []string{relDir})
+	}
+	return git.Log(lr)
+}

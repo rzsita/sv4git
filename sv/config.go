@@ -96,3 +96,11 @@ const (
 	// ReleaseNotesSectionTypeBreakingChanges ReleaseNotesSectionConfig.SectionType value.
 	ReleaseNotesSectionTypeBreakingChanges = "breaking-changes"
 )
+
+// ==== Monorepo ====
+
+// MonorepoConfig monorepo versioning preferences.
+type MonorepoConfig struct {
+	VersioningFile string `yaml:"versioning-file"`
+	Path           string `yaml:"path"`
+}

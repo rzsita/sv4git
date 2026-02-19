@@ -28,6 +28,7 @@ type Git interface {
 	Tags() ([]GitTag, error)
 	Branch() string
 	IsDetached() (bool, error)
+	LastCommitForFile(filePath string) (string, error)
 }
 
 // GitCommitLog description of a single commit log.
@@ -60,11 +61,17 @@ type LogRange struct {
 	rangeType LogRangeType
 	start     string
 	end       string
+	paths     []string // optional: filter commits by these file/directory paths
 }
 
 // NewLogRange LogRange constructor.
 func NewLogRange(t LogRangeType, start, end string) LogRange {
 	return LogRange{rangeType: t, start: start, end: end}
+}
+
+// NewLogRangeWithPaths LogRange constructor with path filtering.
+func NewLogRangeWithPaths(t LogRangeType, start, end string, paths []string) LogRange {
+	return LogRange{rangeType: t, start: start, end: end, paths: paths}
 }
 
 // GitImpl git command implementation.
@@ -107,6 +114,11 @@ func (g GitImpl) Log(lr LogRange) ([]GitCommitLog, error) {
 				params = append(params, lr.start+".."+str(lr.end, "HEAD"))
 			}
 		}
+	}
+
+	if len(lr.paths) > 0 {
+		params = append(params, "--")
+		params = append(params, lr.paths...)
 	}
 
 	cmd := exec.Command("git", params...)
@@ -177,6 +189,17 @@ func (GitImpl) IsDetached() (bool, error) {
 		return false, errors.New(output)
 	}
 	return false, nil
+}
+
+// LastCommitForFile returns the hash of the most recent commit that touched filePath.
+// Returns an empty string (not an error) when the file has no commit history.
+func (GitImpl) LastCommitForFile(filePath string) (string, error) {
+	cmd := exec.Command("git", "log", "--format=%H", "-n", "1", "--", filePath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", combinedOutputErr(err, out)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func parseTagsOutput(input string) ([]GitTag, error) {
