@@ -258,19 +258,23 @@ git-sv rn -h
 
 ##### Available commands
 
-| Variable                     | description                                                    | has options or subcommands |
-| ---------------------------- | -------------------------------------------------------------- | :------------------------: |
-| config, cfg                  | Show config information.                                       |     :heavy_check_mark:     |
-| current-version, cv          | Get last released version from git.                            |            :x:             |
-| next-version, nv             | Generate the next version based on git commit messages.        |            :x:             |
-| commit-log, cl               | List all commit logs according to range as jsons.              |     :heavy_check_mark:     |
-| commit-notes, cn             | Generate a commit notes according to range.                    |     :heavy_check_mark:     |
-| release-notes, rn            | Generate release notes.                                        |     :heavy_check_mark:     |
-| changelog, cgl               | Generate changelog.                                            |     :heavy_check_mark:     |
-| tag, tg                      | Generate tag with version based on git commit messages.        |            :x:             |
-| commit, cmt                  | Execute git commit with convetional commit message helper.     |     :heavy_check_mark:     |
-| validate-commit-message, vcm | Use as prepare-commit-message hook to validate commit message. |     :heavy_check_mark:     |
-| help, h                      | Shows a list of commands or help for one command.              |            :x:             |
+| Variable                     | description                                                                      | has options or subcommands |
+| ---------------------------- | -------------------------------------------------------------------------------- | :------------------------: |
+| config, cfg                  | Show config information.                                                         |     :heavy_check_mark:     |
+| current-version, cv          | Get last released version from git.                                              |            :x:             |
+| next-version, nv             | Generate the next version based on git commit messages.                          |            :x:             |
+| commit-log, cl               | List all commit logs according to range as jsons.                                |     :heavy_check_mark:     |
+| commit-notes, cn             | Generate a commit notes according to range.                                      |     :heavy_check_mark:     |
+| release-notes, rn            | Generate release notes.                                                          |     :heavy_check_mark:     |
+| changelog, cgl               | Generate changelog.                                                              |     :heavy_check_mark:     |
+| tag, tg                      | Generate tag with version based on git commit messages.                          |            :x:             |
+| commit, cmt                  | Execute git commit with convetional commit message helper.                       |     :heavy_check_mark:     |
+| validate-commit-message, vcm | Use as prepare-commit-message hook to validate commit message.                   |     :heavy_check_mark:     |
+| monorepo-next-version, mnv   | Preview the next version for each component in a monorepo.                       |            :x:             |
+| monorepo-bump, mbu           | Bump version files for changed monorepo components without tagging or committing.|            :x:             |
+| monorepo-tag, mtg            | Bump version files, create and push a git tag per changed monorepo component.    |            :x:             |
+| monorepo-changelog, mcgl     | Generate and write CHANGELOG.md for each changed monorepo component.             |            :x:             |
+| help, h                      | Shows a list of commands or help for one command.                                |            :x:             |
 
 ##### Use range
 
@@ -313,6 +317,62 @@ git config --global init.templatedir '<YOUR TEMPLATE DIR>'
 ```
 
 Check [git config docs](https://git-scm.com/docs/git-config#Documentation/git-config.txt-inittemplateDir) for more information!
+
+## Monorepo Support
+
+sv4git can version components inside a monorepo independently. Each component keeps its version in a dedicated file (JSON or YAML). Tags follow the Go module proxy convention: `<component-path>/vX.Y.Z` (e.g. `services/payments/v1.3.0`).
+
+### Config
+
+Add a `monorepo` section to your `.sv4git.yml`:
+
+```yml
+monorepo:
+  versioning-file: "services/*/version.yml" # Glob pattern relative to repo root.
+  path: "version"                            # jq/yq-style path to the version field.
+```
+
+The `path` field supports dot notation and bracket notation for keys that contain dots:
+
+```yml
+monorepo:
+  versioning-file: "components/*/catalog-info.yaml"
+  path: '.metadata.annotations["backstage.io/template-version"]'
+```
+
+### Commands
+
+| Command | Alias | What it does |
+| --- | --- | --- |
+| `monorepo-next-version` | `mnv` | Print the next semver for each component (read-only). |
+| `monorepo-bump` | `mbu` | Write the next version into each component's versioning file. No tag, no commit. |
+| `monorepo-tag` | `mtg` | Write the next version into each component's versioning file **and** create + push a component git tag. |
+| `monorepo-changelog` | `mcgl` | Write a `CHANGELOG.md` into each component's root directory. |
+
+Components with no unreleased commits are skipped by all commands.
+
+### Typical release workflow
+
+```bash
+# 1. Preview what will change.
+git sv mnv
+
+# 2. Bump version files only — inspect the diff before tagging.
+git sv mbu
+git diff
+git add .
+git commit -m "chore: bump component versions for release"
+
+# 3. Create and push the git tags.
+git sv mtg
+
+# 4. Generate changelogs.
+git sv mcgl
+git add .
+git commit -m "docs: update changelogs"
+```
+
+Alternatively, run `git sv mtg` directly to bump and tag in a single step (useful in CI).
 
 ## Development
 

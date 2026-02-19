@@ -47,6 +47,7 @@ func main() {
 	semverProcessor := sv.NewSemVerCommitsProcessor(cfg.Versioning, cfg.CommitMessage)
 	releasenotesProcessor := sv.NewReleaseNoteProcessor(cfg.ReleaseNotes)
 	outputFormatter := sv.NewOutputFormatter(templateFS(filepath.Join(repoPath, configDir, "templates")))
+	monorepoProcessor := sv.NewMonorepoProcessor()
 
 	app := cli.NewApp()
 	app.Name = "sv"
@@ -158,6 +159,30 @@ func main() {
 				&cli.StringFlag{Name: "file", Required: true, Usage: "name of the file that contains the commit log message"},
 				&cli.StringFlag{Name: "source", Required: true, Usage: "source of the commit message"},
 			},
+		},
+		{
+			Name:    "monorepo-next-version",
+			Aliases: []string{"mnv"},
+			Usage:   "generate next version for each component in a monorepo",
+			Action:  monorepoNextVersionHandler(git, semverProcessor, monorepoProcessor, cfg, repoPath),
+		},
+		{
+			Name:    "monorepo-tag",
+			Aliases: []string{"mtg"},
+			Usage:   "update version files for all changed components in a monorepo",
+			Action:  monorepoTagHandler(git, semverProcessor, monorepoProcessor, cfg, repoPath),
+		},
+		{
+			Name:    "monorepo-bump",
+			Aliases: []string{"mbu"},
+			Usage:   "bump version files for all changed components in a monorepo without tagging or committing",
+			Action:  monorepoUpdateVersionHandler(git, semverProcessor, monorepoProcessor, cfg, repoPath),
+		},
+		{
+			Name:    "monorepo-changelog",
+			Aliases: []string{"mcgl"},
+			Usage:   "generate and write CHANGELOG.md for each component in a monorepo",
+			Action:  monorepoChangelogHandler(git, semverProcessor, monorepoProcessor, releasenotesProcessor, outputFormatter, cfg, repoPath),
 		},
 	}
 

@@ -28,6 +28,8 @@ type Git interface {
 	Tags() ([]GitTag, error)
 	Branch() string
 	IsDetached() (bool, error)
+	LastComponentTag(componentPath string) string
+	TagForComponent(version semver.Version, componentPath string) (string, error)
 }
 
 // GitCommitLog description of a single commit log.
@@ -60,11 +62,17 @@ type LogRange struct {
 	rangeType LogRangeType
 	start     string
 	end       string
+	paths     []string // optional: filter commits by these file/directory paths
 }
 
 // NewLogRange LogRange constructor.
 func NewLogRange(t LogRangeType, start, end string) LogRange {
 	return LogRange{rangeType: t, start: start, end: end}
+}
+
+// NewLogRangeWithPaths LogRange constructor with path filtering.
+func NewLogRangeWithPaths(t LogRangeType, start, end string, paths []string) LogRange {
+	return LogRange{rangeType: t, start: start, end: end, paths: paths}
 }
 
 // GitImpl git command implementation.
@@ -107,6 +115,11 @@ func (g GitImpl) Log(lr LogRange) ([]GitCommitLog, error) {
 				params = append(params, lr.start+".."+str(lr.end, "HEAD"))
 			}
 		}
+	}
+
+	if len(lr.paths) > 0 {
+		params = append(params, "--")
+		params = append(params, lr.paths...)
 	}
 
 	cmd := exec.Command("git", params...)
@@ -177,6 +190,37 @@ func (GitImpl) IsDetached() (bool, error) {
 		return false, errors.New(output)
 	}
 	return false, nil
+}
+
+// LastComponentTag returns the most recent Go-style monorepo tag for the given
+// component path (e.g. "templates/my-component/v1.2.3").
+// Returns an empty string when no tag exists for the component.
+func (GitImpl) LastComponentTag(componentPath string) string {
+	filter := componentPath + "/v*"
+	cmd := exec.Command("git", "for-each-ref", "refs/tags/"+filter, "--sort", "-creatordate", "--format", "%(refname:short)", "--count", "1")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TagForComponent creates and pushes an annotated git tag for a monorepo component
+// following the Go standard format: <componentPath>/vX.Y.Z.
+func (GitImpl) TagForComponent(version semver.Version, componentPath string) (string, error) {
+	tag := fmt.Sprintf("%s/v%d.%d.%d", componentPath, version.Major(), version.Minor(), version.Patch())
+	tagMsg := fmt.Sprintf("%s version %d.%d.%d", componentPath, version.Major(), version.Minor(), version.Patch())
+
+	tagCommand := exec.Command("git", "tag", "-a", tag, "-m", tagMsg)
+	if out, err := tagCommand.CombinedOutput(); err != nil {
+		return tag, combinedOutputErr(err, out)
+	}
+
+	pushCommand := exec.Command("git", "push", "origin", tag)
+	if out, err := pushCommand.CombinedOutput(); err != nil {
+		return tag, combinedOutputErr(err, out)
+	}
+	return tag, nil
 }
 
 func parseTagsOutput(input string) ([]GitTag, error) {
