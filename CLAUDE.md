@@ -188,6 +188,66 @@ func currentVersionHandler(git sv.Git) func(c *cli.Context) error {
 
 ---
 
+## Monorepo Feature Architecture
+
+The monorepo feature (`monorepo-*` commands) lets each component in a monorepo maintain its own semver stored in a YAML/JSON file. All design is in `sv/monorepo.go` and `cmd/git-sv/handlers.go`.
+
+### Config
+
+```yaml
+monorepo:
+  versioning-file: "services/*/version.yml"   # filepath.Glob pattern — single * only, no **
+  path: '.metadata.annotations["backstage.io/template-version"]'  # jq/yq-style dot/bracket path
+```
+
+`path` is parsed by `parsePath()` in `sv/monorepo.go`. Bracket notation (`["key.with.dots"]`) handles keys that contain dots or special characters. Leading `.` is optional.
+
+### Git tag convention
+
+Component tags follow the Go module proxy format: `<component-relative-path>/vX.Y.Z`
+(e.g. `services/payments/v1.3.0`). This scopes tags by directory, avoiding collisions.
+
+### Two commit-baseline functions
+
+These two functions serve different purposes and must not be swapped:
+
+| Function | Used by | Baseline |
+|---|---|---|
+| `componentCommits()` | `monorepo-next-version`, `monorepo-tag`, `monorepo-changelog` (tag loop) | Last component tag (`LastComponentTag`) → falls back to all dir commits |
+| `componentBaseVersionAndCommits()` | `monorepo-bump`, `monorepo-changelog --add-next-version` | 3-tier (see below) |
+
+### 3-tier baseline (`componentBaseVersionAndCommits`)
+
+Used by `monorepo-bump` and the `--add-next-version` block of `monorepo-changelog`. Anchors both the commit range and base version to git-committed state to guarantee idempotency:
+
+1. **Last component tag** — version parsed from tag name; commits since that tag.
+2. **Last commit that touched the versioning file** (`LastFileCommit`) — file content at that commit (`ShowFile`) parsed via `ReadVersionFromBytes`; commits since that hash.
+3. **All dir commits** — fallback for brand-new components; uses current file version as base.
+
+After computing `nextVer`, `monorepoUpdateVersionHandler` skips writing if `nextVer == component.CurrentVersion` — this makes `monorepo-bump` idempotent even when the file was bumped but not yet committed.
+
+### `monorepo-changelog` flags mirror `changelog`
+
+`--size N` (default 10), `--all`, `--add-next-version`, `--semantic-version-only`. The `--add-next-version` block calls `componentBaseVersionAndCommits` + `semverProcessor.NextVersion` (not `componentCommits` + `monorepoProcessor.NextVersion`) so the version shown is identical to what `monorepo-bump` would compute.
+
+### New Git interface methods (sv/git.go)
+
+- `LastComponentTag(componentPath string) string` — most recent `<path>/v*` tag
+- `ComponentTags(componentPath string) ([]GitTag, error)` — all `<path>/v*` tags sorted ascending
+- `LastFileCommit(relPath string) string` — hash of last commit touching a file
+- `ShowFile(commit, relPath string) ([]byte, error)` — raw file content at a commit
+
+### File I/O design
+
+Version files are parsed into `map[string]interface{}` (YAML or JSON detected by extension), the version field is mutated in-place, then marshalled back. **YAML comments are not preserved** — acceptable trade-off.
+
+### Limitations
+
+- `filepath.Glob` supports only single `*`, not `**`. Deep patterns won't work.
+- YAML comments in versioning files are silently dropped on write.
+
+---
+
 ## Commit Message Convention
 
 This repository uses **Conventional Commits** enforced by sv4git itself (via `.sv4git.yml`).
@@ -248,6 +308,7 @@ Triggered on pushes to `master` (ignores `.md` and `.gitignore` changes). Pipeli
 | `sv/semver.go` | Next-version calculation from commits |
 | `sv/releasenotes.go` | Release note data model and processor |
 | `sv/formatter.go` | Template-based output formatting |
+| `sv/monorepo.go` | `MonorepoComponent`, `MonorepoProcessor`, file I/O helpers, `parsePath` |
 | `sv/config.go` | Config type definitions (shared by CLI and library) |
 | `.sv4git.yml` | This repo's sv4git configuration |
 | `.golangci.yml` | Linter configuration |

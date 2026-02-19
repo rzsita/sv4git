@@ -538,12 +538,12 @@ func monorepoNextVersionHandler(
 		}
 
 		for _, component := range components {
-			commits, cerr := componentCommits(git, repoPath, component)
+			baseVer, commits, cerr := componentBaseVersionAndCommits(git, repoPath, component, cfg.Monorepo.Path)
 			if cerr != nil {
 				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
 			}
 
-			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			nextVer, updated := semverProcessor.NextVersion(baseVer, commits)
 			if !updated {
 				nextVer = component.CurrentVersion
 			}
@@ -610,14 +610,19 @@ func monorepoUpdateVersionHandler(
 		}
 
 		for _, component := range components {
-			commits, cerr := componentCommits(git, repoPath, component)
+			baseVer, commits, cerr := componentBaseVersionAndCommits(git, repoPath, component, cfg.Monorepo.Path)
 			if cerr != nil {
 				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
 			}
 
-			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			nextVer, updated := semverProcessor.NextVersion(baseVer, commits)
 			if !updated {
-				fmt.Printf("%s: no version change (current: %s)\n", component.Name, component.CurrentVersion.String())
+				fmt.Printf("%s: no version change (current: %s)\n", component.Name, baseVer.String())
+				continue
+			}
+
+			if nextVer.Equal(component.CurrentVersion) {
+				fmt.Printf("%s: already at %s\n", component.Name, component.CurrentVersion.String())
 				continue
 			}
 
@@ -640,32 +645,74 @@ func monorepoChangelogHandler(
 	repoPath string,
 ) func(c *cli.Context) error {
 	return func(c *cli.Context) error {
+		size := c.Int("size")
+		all := c.Bool("all")
+		addNextVersion := c.Bool("add-next-version")
+		semanticVersionOnly := c.Bool("semantic-version-only")
+
 		components, err := monorepoProcessor.FindComponents(repoPath, cfg.Monorepo)
 		if err != nil {
 			return fmt.Errorf("error finding monorepo components: %v", err)
 		}
 
 		for _, component := range components {
-			commits, cerr := componentCommits(git, repoPath, component)
-			if cerr != nil {
-				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
+			relDir, rerr := filepath.Rel(repoPath, component.RootPath)
+			if rerr != nil {
+				return fmt.Errorf("error resolving path for %s: %v", component.Name, rerr)
 			}
 
-			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
-			if !updated {
-				fmt.Printf("%s: no changes, skipping changelog\n", component.Name)
+			var releaseNotes []sv.ReleaseNote
+
+			if addNextVersion {
+				baseVer, commits, cerr := componentBaseVersionAndCommits(git, repoPath, component, cfg.Monorepo.Path)
+				if cerr != nil {
+					return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
+				}
+				nextVer, updated := semverProcessor.NextVersion(baseVer, commits)
+				if updated {
+					var date time.Time
+					if len(commits) > 0 {
+						date, _ = time.Parse("2006-01-02", commits[0].Date)
+					} else {
+						date = time.Now()
+					}
+					releaseNotes = append(releaseNotes, rnProcessor.Create(nextVer, "", date, commits))
+				}
+			}
+
+			componentTags, terr := git.ComponentTags(relDir)
+			if terr != nil {
+				return fmt.Errorf("error getting tags for %s: %v", component.Name, terr)
+			}
+			sort.Slice(componentTags, func(i, j int) bool {
+				return componentTags[i].Date.After(componentTags[j].Date)
+			})
+
+			for i, tag := range componentTags {
+				if !all && i >= size {
+					break
+				}
+				if semanticVersionOnly && !sv.IsValidVersion(filepath.Base(tag.Name)) {
+					continue
+				}
+				previousTag := ""
+				if i+1 < len(componentTags) {
+					previousTag = componentTags[i+1].Name
+				}
+				commits, cerr := git.Log(sv.NewLogRangeWithPaths(sv.TagRange, previousTag, tag.Name, []string{relDir}))
+				if cerr != nil {
+					return fmt.Errorf("error getting commits for tag %s: %v", tag.Name, cerr)
+				}
+				tagVer, _ := sv.ToVersion(filepath.Base(tag.Name))
+				releaseNotes = append(releaseNotes, rnProcessor.Create(tagVer, tag.Name, tag.Date, commits))
+			}
+
+			if len(releaseNotes) == 0 {
+				fmt.Printf("%s: no changelog entries, skipping\n", component.Name)
 				continue
 			}
 
-			var date time.Time
-			if len(commits) > 0 {
-				date, _ = time.Parse("2006-01-02", commits[0].Date)
-			} else {
-				date = time.Now()
-			}
-
-			releaseNote := rnProcessor.Create(nextVer, "", date, commits)
-			output, ferr := outputFormatter.FormatChangelog([]sv.ReleaseNote{releaseNote})
+			output, ferr := outputFormatter.FormatChangelog(releaseNotes)
 			if ferr != nil {
 				return fmt.Errorf("could not format changelog for %s: %v", component.Name, ferr)
 			}
@@ -683,12 +730,61 @@ func monorepoChangelogHandler(
 // componentCommits returns commits that touched the component's directory since the
 // last Go-style component tag (e.g. "templates/my-component/v1.2.3").
 // Falls back to all directory commits when no component tag exists yet (first run).
-func componentCommits(git sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
+func componentCommits(g sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
 	relDir, err := filepath.Rel(repoPath, component.RootPath)
 	if err != nil {
 		return nil, err
 	}
-	lastTag := git.LastComponentTag(relDir)
+	lastTag := g.LastComponentTag(relDir)
 	lr := sv.NewLogRangeWithPaths(sv.TagRange, lastTag, "", []string{relDir})
-	return git.Log(lr)
+	return g.Log(lr)
+}
+
+// componentBaseVersionAndCommits returns the anchored base version and the commits
+// since that baseline for use in monorepo-bump calculations.
+//
+// It uses a 3-tier baseline strategy to ensure idempotency:
+//  1. Last component tag — most precise; version extracted from tag name.
+//  2. Last commit that modified the versioning file — version read from file at
+//     that commit via ShowFile; commits since that hash are returned.
+//  3. All commits for the directory — fallback for brand-new components whose
+//     versioning file has never been committed; uses current file version as base.
+//
+// Because the base version is anchored to the git-committed state (not the current
+// on-disk state), running monorepo-bump twice without new commits is a no-op:
+// nextVer == component.CurrentVersion → handler skips the write.
+func componentBaseVersionAndCommits(g sv.Git, repoPath string, component sv.MonorepoComponent, dotPath string) (*semver.Version, []sv.GitCommitLog, error) {
+	relDir, err := filepath.Rel(repoPath, component.RootPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Priority 1: last component tag.
+	if lastTag := g.LastComponentTag(relDir); lastTag != "" {
+		tagVer, _ := sv.ToVersion(filepath.Base(lastTag))
+		commits, cerr := g.Log(sv.NewLogRangeWithPaths(sv.TagRange, lastTag, "", []string{relDir}))
+		return tagVer, commits, cerr
+	}
+
+	// Priority 2: last commit that touched the versioning file.
+	relFile, ferr := filepath.Rel(repoPath, component.VersioningFilePath)
+	if ferr == nil {
+		if fileCommit := g.LastFileCommit(relFile); fileCommit != "" {
+			commits, cerr := g.Log(sv.NewLogRangeWithPaths(sv.HashRange, fileCommit, "", []string{relDir}))
+			if cerr != nil {
+				return nil, nil, cerr
+			}
+			if content, serr := g.ShowFile(fileCommit, relFile); serr == nil {
+				if baseVer, verr := sv.ReadVersionFromBytes(component.VersioningFilePath, content, dotPath); verr == nil {
+					return baseVer, commits, nil
+				}
+			}
+			// ShowFile or parse failed — still use the narrowed commit range.
+			return component.CurrentVersion, commits, nil
+		}
+	}
+
+	// Priority 3: all commits (versioning file never committed).
+	commits, cerr := g.Log(sv.NewLogRangeWithPaths(sv.TagRange, "", "", []string{relDir}))
+	return component.CurrentVersion, commits, cerr
 }

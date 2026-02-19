@@ -183,6 +183,12 @@ func main() {
 			Aliases: []string{"mcgl"},
 			Usage:   "generate and write CHANGELOG.md for each component in a monorepo",
 			Action:  monorepoChangelogHandler(git, semverProcessor, monorepoProcessor, releasenotesProcessor, outputFormatter, cfg, repoPath),
+			Flags: []cli.Flag{
+				&cli.IntFlag{Name: "size", Value: 10, Aliases: []string{"n"}, Usage: "include last 'n' component tags per component in the changelog"},
+				&cli.BoolFlag{Name: "all", Usage: "ignore size parameter, include all component tag history"},
+				&cli.BoolFlag{Name: "add-next-version", Usage: "prepend unreleased commits as next version at the top"},
+				&cli.BoolFlag{Name: "semantic-version-only", Usage: "skip component tags that are not valid semver"},
+			},
 		},
 	}
 

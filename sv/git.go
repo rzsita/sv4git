@@ -30,6 +30,9 @@ type Git interface {
 	IsDetached() (bool, error)
 	LastComponentTag(componentPath string) string
 	TagForComponent(version semver.Version, componentPath string) (string, error)
+	LastFileCommit(relPath string) string
+	ShowFile(commit, relPath string) ([]byte, error)
+	ComponentTags(componentPath string) ([]GitTag, error)
 }
 
 // GitCommitLog description of a single commit log.
@@ -221,6 +224,39 @@ func (GitImpl) TagForComponent(version semver.Version, componentPath string) (st
 		return tag, combinedOutputErr(err, out)
 	}
 	return tag, nil
+}
+
+// LastFileCommit returns the hash of the most recent commit that touched relPath.
+// Returns an empty string (no error) if the file has never been committed.
+func (GitImpl) LastFileCommit(relPath string) string {
+	cmd := exec.Command("git", "log", "--format=%H", "-n", "1", "--", relPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// ShowFile returns the raw content of relPath at the given commit.
+func (GitImpl) ShowFile(commit, relPath string) ([]byte, error) {
+	cmd := exec.Command("git", "show", commit+":"+relPath)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, combinedOutputErr(err, out)
+	}
+	return out, nil
+}
+
+// ComponentTags returns all Go-style monorepo tags for the given component path,
+// sorted ascending by date (oldest first).
+func (GitImpl) ComponentTags(componentPath string) ([]GitTag, error) {
+	filter := componentPath + "/v*"
+	cmd := exec.Command("git", "for-each-ref", "--sort", "creatordate", "--format", "%(creatordate:iso8601)#%(refname:short)", "refs/tags/"+filter)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, combinedOutputErr(err, out)
+	}
+	return parseTagsOutput(string(out))
 }
 
 func parseTagsOutput(input string) ([]GitTag, error) {

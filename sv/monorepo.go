@@ -79,11 +79,9 @@ func (p MonorepoProcessorImpl) UpdateVersion(component MonorepoComponent, versio
 
 // ---- file I/O helpers ----
 
-func readVersionFromFile(filePath, dotPath string) (*semver.Version, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
+// ReadVersionFromBytes parses version from raw file content using the given dotPath.
+// filePath is used only for format detection (YAML vs JSON) based on extension.
+func ReadVersionFromBytes(filePath string, content []byte, dotPath string) (*semver.Version, error) {
 	data, err := parseFileContent(filePath, content)
 	if err != nil {
 		return nil, err
@@ -105,6 +103,14 @@ func readVersionFromFile(filePath, dotPath string) (*semver.Version, error) {
 		return nil, fmt.Errorf("path %q: invalid semver %q: %v", dotPath, vstr, err)
 	}
 	return v, nil
+}
+
+func readVersionFromFile(filePath, dotPath string) (*semver.Version, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+	return ReadVersionFromBytes(filePath, content, dotPath)
 }
 
 func writeVersionToFile(filePath, dotPath, version string) error {
