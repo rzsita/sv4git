@@ -617,7 +617,11 @@ func monorepoChangelogHandler(
 				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
 			}
 
-			nextVer, _ := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			if !updated {
+				fmt.Printf("%s: no changes, skipping changelog\n", component.Name)
+				continue
+			}
 
 			var date time.Time
 			if len(commits) > 0 {
@@ -633,7 +637,7 @@ func monorepoChangelogHandler(
 			}
 
 			changelogPath := filepath.Join(component.RootPath, "CHANGELOG.md")
-			if werr := os.WriteFile(changelogPath, []byte(output), 0644); werr != nil {
+			if werr := os.WriteFile(changelogPath, []byte(output), 0600); werr != nil {
 				return fmt.Errorf("could not write changelog for %s: %v", component.Name, werr)
 			}
 			fmt.Printf("%s: changelog written to %s\n", component.Name, changelogPath)

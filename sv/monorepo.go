@@ -159,7 +159,7 @@ func marshalToFile(filePath string, data map[string]interface{}) error {
 			return fmt.Errorf("marshal YAML: %v", err)
 		}
 	}
-	return os.WriteFile(filePath, out, 0644)
+	return os.WriteFile(filePath, out, 0600)
 }
 
 // ---- path parsing and navigation ----

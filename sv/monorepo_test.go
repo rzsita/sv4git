@@ -52,6 +52,11 @@ func TestParsePath(t *testing.T) {
 			want: []string{"metadata", "section", "version"},
 		},
 		{
+			name: "top-level bracket notation without leading dot",
+			path: `["top-level-key"]`,
+			want: []string{"top-level-key"},
+		},
+		{
 			name:    "empty path",
 			path:    "",
 			wantErr: true,
