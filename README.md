@@ -273,7 +273,7 @@ git-sv rn -h
 | monorepo-next-version, mnv   | Preview the next version for each component in a monorepo.                       |            :x:             |
 | monorepo-bump, mbu           | Bump version files for changed monorepo components without tagging or committing.|            :x:             |
 | monorepo-tag, mtg            | Bump version files, create and push a git tag per changed monorepo component.    |            :x:             |
-| monorepo-changelog, mcgl     | Generate and write CHANGELOG.md for each changed monorepo component.             |            :x:             |
+| monorepo-changelog, mcgl     | Generate and write CHANGELOG.md for each monorepo component.                     |     :heavy_check_mark:     |
 | help, h                      | Shows a list of commands or help for one command.                                |            :x:             |
 
 ##### Use range
@@ -345,11 +345,22 @@ monorepo:
 | Command | Alias | What it does |
 | --- | --- | --- |
 | `monorepo-next-version` | `mnv` | Print the next semver for each component (read-only). |
-| `monorepo-bump` | `mbu` | Write the next version into each component's versioning file. No tag, no commit. |
+| `monorepo-bump` | `mbu` | Write the next version into each component's versioning file. No tag, no commit. Idempotent — running it twice without new commits is a no-op. |
 | `monorepo-tag` | `mtg` | Write the next version into each component's versioning file **and** create + push a component git tag. |
 | `monorepo-changelog` | `mcgl` | Write a `CHANGELOG.md` into each component's root directory. |
 
-Components with no unreleased commits are skipped by all commands.
+Components with no unreleased commits are skipped by `monorepo-next-version`, `monorepo-bump`, and `monorepo-tag`. `monorepo-changelog` skips components only when there are no tagged releases and no unreleased commits to show.
+
+#### monorepo-changelog flags
+
+| Flag | Default | Description |
+| --- | --- | --- |
+| `--size N`, `-n N` | `10` | Include the last N component tags per component in the changelog. |
+| `--all` | `false` | Ignore `--size`; include all component tag history. |
+| `--add-next-version` | `false` | Prepend unreleased commits as the next (unreleased) version at the top. The version shown matches what `monorepo-bump` would compute. |
+| `--semantic-version-only` | `false` | Skip component tags that are not valid semver. |
+
+By default (`git sv mcgl`) the last 10 component tags are written to each `CHANGELOG.md`. Use `--add-next-version` to also include commits that have been bumped with `monorepo-bump` but not yet tagged.
 
 ### Typical release workflow
 
@@ -363,16 +374,16 @@ git diff
 git add .
 git commit -m "chore: bump component versions for release"
 
-# 3. Create and push the git tags.
-git sv mtg
-
-# 4. Generate changelogs.
-git sv mcgl
+# 3. Generate changelogs (include the bumped-but-not-yet-tagged version at top).
+git sv mcgl --add-next-version
 git add .
 git commit -m "docs: update changelogs"
+
+# 4. Create and push the git tags.
+git sv mtg
 ```
 
-Alternatively, run `git sv mtg` directly to bump and tag in a single step (useful in CI).
+Alternatively, skip the manual bump/changelog steps and let `git sv mtg` do everything in one shot (bump + tag). After tagging you can run `git sv mcgl` (no flags) to regenerate changelogs from the new tag history.
 
 ## Development
 

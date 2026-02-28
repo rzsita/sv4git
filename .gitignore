@@ -21,3 +21,6 @@ artifacts/
 # Mac metadata
 
 .DS_Store
+
+# Claude Code local state
+.claude/
