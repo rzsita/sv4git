@@ -545,7 +545,7 @@ func monorepoNextVersionHandler(
 
 			nextVer, updated := semverProcessor.NextVersion(baseVer, commits)
 			if !updated {
-				nextVer = component.CurrentVersion
+				nextVer = baseVer
 			}
 			fmt.Printf("%s: %s\n", component.Name, nextVer.String())
 		}
@@ -684,9 +684,6 @@ func monorepoChangelogHandler(
 			if terr != nil {
 				return fmt.Errorf("error getting tags for %s: %v", component.Name, terr)
 			}
-			sort.Slice(componentTags, func(i, j int) bool {
-				return componentTags[i].Date.After(componentTags[j].Date)
-			})
 
 			for i, tag := range componentTags {
 				if !all && i >= size {
@@ -730,6 +727,12 @@ func monorepoChangelogHandler(
 // componentCommits returns commits that touched the component's directory since the
 // last Go-style component tag (e.g. "templates/my-component/v1.2.3").
 // Falls back to all directory commits when no component tag exists yet (first run).
+//
+// Used exclusively by monorepoTagHandler. The simpler last-tag baseline is correct
+// there because monorepo-tag always creates a new tag immediately after bumping —
+// so the on-disk version is never "ahead" of the committed baseline. Commands that
+// may run after a monorepo-bump (where the file is bumped but not yet tagged) must
+// use componentBaseVersionAndCommits instead to maintain idempotency.
 func componentCommits(g sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
 	relDir, err := filepath.Rel(repoPath, component.RootPath)
 	if err != nil {
@@ -777,7 +780,11 @@ func componentBaseVersionAndCommits(g sv.Git, repoPath string, component sv.Mono
 			if content, serr := g.ShowFile(fileCommit, relFile); serr == nil {
 				if baseVer, verr := sv.ReadVersionFromBytes(component.VersioningFilePath, content, dotPath); verr == nil {
 					return baseVer, commits, nil
+				} else {
+					warnf("could not parse version from %s at %s, falling back to on-disk version: %v", relFile, fileCommit, verr)
 				}
+			} else {
+				warnf("could not read %s at %s, falling back to on-disk version: %v", relFile, fileCommit, serr)
 			}
 			// ShowFile or parse failed — still use the narrowed commit range.
 			return component.CurrentVersion, commits, nil

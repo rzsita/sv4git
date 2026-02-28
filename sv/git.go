@@ -248,10 +248,10 @@ func (GitImpl) ShowFile(commit, relPath string) ([]byte, error) {
 }
 
 // ComponentTags returns all Go-style monorepo tags for the given component path,
-// sorted ascending by date (oldest first).
+// sorted descending by date (newest first).
 func (GitImpl) ComponentTags(componentPath string) ([]GitTag, error) {
 	filter := componentPath + "/v*"
-	cmd := exec.Command("git", "for-each-ref", "--sort", "creatordate", "--format", "%(creatordate:iso8601)#%(refname:short)", "refs/tags/"+filter)
+	cmd := exec.Command("git", "for-each-ref", "--sort", "-creatordate", "--format", "%(creatordate:iso8601)#%(refname:short)", "refs/tags/"+filter)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, combinedOutputErr(err, out)

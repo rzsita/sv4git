@@ -213,12 +213,12 @@ These two functions serve different purposes and must not be swapped:
 
 | Function | Used by | Baseline |
 |---|---|---|
-| `componentCommits()` | `monorepo-next-version`, `monorepo-tag`, `monorepo-changelog` (tag loop) | Last component tag (`LastComponentTag`) → falls back to all dir commits |
-| `componentBaseVersionAndCommits()` | `monorepo-bump`, `monorepo-changelog --add-next-version` | 3-tier (see below) |
+| `componentCommits()` | `monorepo-tag` only | Last component tag (`LastComponentTag`) → falls back to all dir commits |
+| `componentBaseVersionAndCommits()` | `monorepo-next-version`, `monorepo-bump`, `monorepo-changelog --add-next-version` | 3-tier (see below) |
 
 ### 3-tier baseline (`componentBaseVersionAndCommits`)
 
-Used by `monorepo-bump` and the `--add-next-version` block of `monorepo-changelog`. Anchors both the commit range and base version to git-committed state to guarantee idempotency:
+Used by `monorepo-next-version`, `monorepo-bump`, and the `--add-next-version` block of `monorepo-changelog`. Anchors both the commit range and base version to git-committed state to guarantee idempotency:
 
 1. **Last component tag** — version parsed from tag name; commits since that tag.
 2. **Last commit that touched the versioning file** (`LastFileCommit`) — file content at that commit (`ShowFile`) parsed via `ReadVersionFromBytes`; commits since that hash.

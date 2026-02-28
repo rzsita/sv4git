@@ -7,7 +7,8 @@
   ],
   "shell": {
     "init_hook": [
-      "echo 'devbox ready: go' $(go version | awk '{print $3}')"
+      "echo 'devbox ready: go' $(go version | awk '{print $3}')",
+      "echo 'NOTE: devbox uses go@1.26 for local dev; go.mod declares go 1.19 for CI compatibility'"
     ],
     "scripts": {
       "build": ["make build"],

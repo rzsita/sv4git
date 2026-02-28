@@ -371,9 +371,9 @@ func Test_monorepoChangelogHandler_WithTagHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Two component tags, oldest first (handler sorts descending).
-	tag1 := sv.GitTag{Name: "sigma/v1.0.0", Date: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
-	tag2 := sv.GitTag{Name: "sigma/v1.1.0", Date: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)}
+	// Two component tags, newest first (matching ComponentTags sort order).
+	tag1 := sv.GitTag{Name: "sigma/v1.1.0", Date: time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)}
+	tag2 := sv.GitTag{Name: "sigma/v1.0.0", Date: time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)}
 
 	git := mockGit{
 		lastComponentTagFn: func(string) string { return "" },
