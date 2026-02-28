@@ -1,4 +1,4 @@
-# cmd/git-sv/ — CLI Entry Point
+# Architecture & Key Concepts
 
 ## Dependency Flow
 
@@ -14,7 +14,15 @@ main.go
   └─ registers CLI commands → handlers.go
 ```
 
-## Config Loading (`config.go`)
+## Core Interfaces (`sv/`)
+
+- **`Git`** (`sv/git.go`): Wraps `git` subprocess calls. Methods: `LastTag`, `Log`, `Commit`, `Tag`, `Tags`, `Branch`, `IsDetached`.
+- **`MessageProcessor`** (`sv/message.go`): Parses, validates, formats commit messages per Conventional Commits. Auto-extracts issue IDs from branch names.
+- **`SemVerCommitsProcessor`** (`sv/semver.go`): Given commits, determines next semver bump (major/minor/patch/none).
+- **`ReleaseNoteProcessor`** (`sv/releasenotes.go`): Groups commits into sections → `ReleaseNote` structs.
+- **`OutputFormatter`** (`sv/formatter.go`): Renders `ReleaseNote`/`[]ReleaseNote` via Go `text/template`. Functions: `timefmt`, `getsection`, `getenv`.
+
+## Config Loading (`cmd/git-sv/config.go`)
 
 Priority order: **repository > user > default**.
 
@@ -26,7 +34,7 @@ Slices and pointers are always **overwritten** (not merged) via a custom `mergeT
 
 ## CLI Commands
 
-Defined in `main.go`, handlers in `handlers.go`:
+Defined in `cmd/git-sv/main.go`, handlers in `cmd/git-sv/handlers.go`:
 
 | Command / alias | What it does |
 |---|---|
@@ -58,4 +66,4 @@ func currentVersionHandler(git sv.Git) func(c *cli.Context) error {
 
 - Default templates embedded at compile time via `//go:embed resources/templates/*.tpl`.
 - Repository overrides: `.sv4git/templates/` at repo root. Partial overrides require **both** `changelog-md.tpl` and `releasenotes-md.tpl` present.
-- Available functions: `timefmt`, `getsection`, `getenv`.
+- Available template functions: `timefmt`, `getsection`, `getenv`.

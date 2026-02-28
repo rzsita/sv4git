@@ -17,7 +17,6 @@ sv4git/
 │   ├── handlers.go          # Command handler functions
 │   ├── config.go            # Config types, loading, merging, env vars
 │   ├── prompt.go            # Interactive prompts (promptui wrappers)
-│   ├── log.go               # Logging helpers
 │   └── resources/templates/ # Embedded Go templates (via go:embed)
 ├── sv/                      # Core library (package sv)
 │   ├── config.go            # Config struct types
@@ -26,8 +25,7 @@ sv4git/
 │   ├── semver.go            # SemVerCommitsProcessor (version bumping logic)
 │   ├── releasenotes.go      # ReleaseNote, ReleaseNoteProcessor
 │   ├── formatter.go         # OutputFormatter (renders Go templates)
-│   ├── formatter_functions.go # Template helper functions (timefmt, getsection)
-│   └── monorepo.go          # MonorepoComponent, MonorepoProcessor, file I/O, parsePath
+│   └── monorepo.go          # MonorepoComponent, MonorepoProcessor, parsePath
 ├── .sv4git.yml              # This repo's sv4git config (authoritative for commit rules)
 ├── .golangci.yml            # golangci-lint config (enables tagliatelle linter)
 ├── Makefile                 # All dev targets — run `make` to list them
@@ -38,13 +36,11 @@ sv4git/
 
 ## Development
 
-All tasks use `make`. Run `make` to list targets. Key commands:
+All tasks use `make`. Run `make` to list all targets. Key commands:
 
 - `make build` — run tests then build to `bin/linux_amd64/git-sv`
 - `make test` — `go test ./...`
 - `make lint` / `make lint-autofix` — golangci-lint
-
-Tests live as `*_test.go` alongside source. `sv/` uses table-driven unit tests.
 
 ---
 
@@ -55,10 +51,8 @@ Tests live as `*_test.go` alongside source. `sv/` uses table-driven unit tests.
 `tagliatelle` linter enforces (see `.golangci.yml`): `json` → **camelCase**, `yaml`/`mapstructure` → **kebab-case**.
 
 ```go
-type Example struct {
-    AuthorName   string `json:"authorName"`       // camelCase
-    SkipDetached *bool  `yaml:"skip-detached"`    // kebab-case
-}
+AuthorName   string `json:"authorName"`       // camelCase
+SkipDetached *bool  `yaml:"skip-detached"`    // kebab-case
 ```
 
 ### Error Handling
@@ -73,7 +67,7 @@ type Example struct {
 
 Format: `<type>(<scope>): <description>` — authoritative rules in `.sv4git.yml`.
 
-Version bumping (this repo): `feat` → minor · `fix`/`build`/`ci`/`chore`/`perf`/`refactor`/`test` → patch · breaking change (`BREAKING CHANGE:` footer or `!`) → major.
+Bumps (this repo): `feat` → minor · `fix`/`build`/`ci`/`chore`/`perf`/`refactor`/`test` → patch · breaking change (`BREAKING CHANGE:` footer or `!`) → major.
 
 Tag pattern: `v%d.%d.%d`. Issue footer: `issue: #<number>` (auto-extracted from branch names matching `#?[0-9]+`).
 
@@ -82,3 +76,15 @@ Tag pattern: `v%d.%d.%d`. Issue footer: `issue: #<number>` (auto-extracted from 
 ## CI/CD
 
 PRs to `master`: lint + build. Merges to `master`: lint → build → `git sv tag` → multi-platform release. See `.github/workflows/`.
+
+---
+
+## Supplementary Context
+
+Read these files when working on the relevant area — they are not loaded automatically:
+
+| File | When to read |
+|---|---|
+| `docs/architecture.md` | Working on CLI commands, config loading, handler/template patterns, or the dependency wiring in `main.go` |
+| `docs/monorepo.md` | Working on any `monorepo-*` command or `sv/monorepo.go` |
+| `docs/testing.md` | Writing or debugging tests, or adjusting linter config |
