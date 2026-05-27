@@ -103,4 +103,18 @@ const (
 type MonorepoConfig struct {
 	VersioningFile string `yaml:"versioning-file"`
 	Path           string `yaml:"path"`
+	VersionPrefix  string `yaml:"-"` // derived at runtime from tag.pattern; not serialized
+}
+
+// VersionPrefixFromPattern extracts the version prefix from a tag pattern.
+// For example "v%d.%d.%d" → "v", "%d.%d.%d" → "".
+func VersionPrefixFromPattern(pattern string) string {
+	idx := 0
+	for idx < len(pattern) {
+		if idx+2 <= len(pattern) && pattern[idx:idx+2] == "%d" {
+			return pattern[:idx]
+		}
+		idx++
+	}
+	return ""
 }
