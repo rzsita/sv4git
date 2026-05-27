@@ -42,6 +42,9 @@ func main() {
 	}
 
 	cfg := loadCfg(repoPath)
+	if cfg.Tag.Pattern != nil {
+		cfg.Monorepo.VersionPrefix = sv.VersionPrefixFromPattern(*cfg.Tag.Pattern)
+	}
 	messageProcessor := sv.NewMessageProcessor(cfg.CommitMessage, cfg.Branches)
 	git := sv.NewGit(messageProcessor, cfg.Tag)
 	semverProcessor := sv.NewSemVerCommitsProcessor(cfg.Versioning, cfg.CommitMessage)

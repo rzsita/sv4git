@@ -3,6 +3,7 @@ package sv
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -334,41 +335,238 @@ func TestReadVersionFromFile(t *testing.T) {
 func TestWriteVersionToFile(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name    string
-		ext     string
-		content string
-		dotPath string
-		version string
-		wantErr bool
+		name        string
+		ext         string
+		content     string
+		dotPath     string
+		version     string
+		wantErr     bool
+		wantContent string // if non-empty, exact file bytes expected after write
 	}{
 		{
-			name:    "yaml round-trip",
-			ext:     ".yml",
-			content: "version: 1.0.0\n",
-			dotPath: "version",
-			version: "1.1.0",
+			name:        "yaml round-trip",
+			ext:         ".yml",
+			content:     "version: 1.0.0\n",
+			dotPath:     "version",
+			version:     "1.1.0",
+			wantContent: "version: 1.1.0\n",
 		},
 		{
-			name:    "json round-trip",
-			ext:     ".json",
-			content: `{"version": "1.0.0"}`,
-			dotPath: "version",
-			version: "2.0.0",
+			name:        "json round-trip",
+			ext:         ".json",
+			content:     `{"version": "1.0.0"}`,
+			dotPath:     "version",
+			version:     "2.0.0",
+			wantContent: `{"version": "2.0.0"}`,
 		},
 		{
-			name:    "nested yaml round-trip",
-			ext:     ".yaml",
-			content: "metadata:\n  version: 0.1.0\n",
+			name:        "nested yaml round-trip",
+			ext:         ".yaml",
+			content:     "metadata:\n  version: 0.1.0\n",
+			dotPath:     "metadata.version",
+			version:     "0.2.0",
+			wantContent: "metadata:\n  version: 0.2.0\n",
+		},
+		{
+			name:        "yaml inserts missing leaf key",
+			ext:         ".yml",
+			content:     "other: value\n",
+			dotPath:     "other",
+			version:     "1.0.0",
+			wantContent: "other: 1.0.0\n",
+		},
+		{
+			name:        "yaml inserts missing nested key",
+			ext:         ".yml",
+			content:     "metadata:\n  annotations:\n    backstage.io/techdocs-ref: dir:.\n",
+			dotPath:     `.metadata.annotations["backstage.io/template-version"]`,
+			version:     "1.0.0",
+			wantContent: "metadata:\n  annotations:\n    backstage.io/techdocs-ref: dir:.\n    backstage.io/template-version: 1.0.0\n",
+		},
+		{
+			name:        "json inserts missing key",
+			ext:         ".json",
+			content:     `{"metadata": {"name": "test"}}`,
+			dotPath:     "metadata.version",
+			version:     "1.0.0",
+			wantContent: `{"metadata": {"name": "test", "version": "1.0.0"}}`,
+		},
+		{
+			name:        "yaml preserves comments",
+			ext:         ".yml",
+			content:     "# Component config\nmetadata:\n  name: my-svc\n  version: 1.0.0  # current ver\nother: stuff\n",
+			dotPath:     "metadata.version",
+			version:     "1.1.0",
+			wantContent: "# Component config\nmetadata:\n  name: my-svc\n  version: 1.1.0  # current ver\nother: stuff\n",
+		},
+		{
+			name:        "yaml preserves double-quoted value",
+			ext:         ".yml",
+			content:     "version: \"1.0.0\"\n",
+			dotPath:     "version",
+			version:     "2.0.0",
+			wantContent: "version: \"2.0.0\"\n",
+		},
+		{
+			name:        "yaml preserves single-quoted value",
+			ext:         ".yml",
+			content:     "version: '1.0.0'\n",
+			dotPath:     "version",
+			version:     "2.0.0",
+			wantContent: "version: '2.0.0'\n",
+		},
+		{
+			name: "yaml preserves blank lines and indentation",
+			ext:  ".yml",
+			content: `# Top comment
+
+metadata:
+    version: 3.0.0
+
+    name: test
+`,
 			dotPath: "metadata.version",
-			version: "0.2.0",
+			version: "3.1.0",
+			wantContent: `# Top comment
+
+metadata:
+    version: 3.1.0
+
+    name: test
+`,
 		},
 		{
-			name:    "missing path returns error",
-			ext:     ".yml",
-			content: "other: value\n",
-			dotPath: "version",
+			name:        "yaml bracket notation path preserves formatting",
+			ext:         ".yml",
+			content:     "metadata:\n  annotations:\n    backstage.io/template-version: 1.2.3\n",
+			dotPath:     `.metadata.annotations["backstage.io/template-version"]`,
+			version:     "1.3.0",
+			wantContent: "metadata:\n  annotations:\n    backstage.io/template-version: 1.3.0\n",
+		},
+		{
+			name: "json preserves custom indentation",
+			ext:  ".json",
+			content: `{
+    "name": "test",
+    "metadata": {
+        "version": "1.0.0"
+    }
+}`,
+			dotPath: "metadata.version",
+			version: "1.1.0",
+			wantContent: `{
+    "name": "test",
+    "metadata": {
+        "version": "1.1.0"
+    }
+}`,
+		},
+		{
+			name:        "json does not touch other version-like strings",
+			ext:         ".json",
+			content:     `{"name":"1.0.0","version":"1.0.0","description":"ver 1.0.0"}`,
+			dotPath:     "version",
+			version:     "2.0.0",
+			wantContent: `{"name":"1.0.0","version":"2.0.0","description":"ver 1.0.0"}`,
+		},
+		{
+			name:        "yaml version length change (shorter)",
+			ext:         ".yml",
+			content:     "version: 10.20.30\nname: test\n",
+			dotPath:     "version",
+			version:     "1.0.0",
+			wantContent: "version: 1.0.0\nname: test\n",
+		},
+		{
+			name:        "yaml version length change (longer)",
+			ext:         ".yml",
+			content:     "version: 1.0.0\nname: test\n",
+			dotPath:     "version",
+			version:     "10.20.30",
+			wantContent: "version: 10.20.30\nname: test\n",
+		},
+		{
+			name: "json inserts key into pretty-printed object",
+			ext:  ".json",
+			content: `{
+    "name": "test",
+    "metadata": {
+        "name": "inner"
+    }
+}`,
+			dotPath: "metadata.version",
 			version: "1.0.0",
-			wantErr: true,
+			wantContent: `{
+    "name": "test",
+    "metadata": {
+        "name": "inner",
+        "version": "1.0.0"
+    }
+}`,
+		},
+		{
+			name:        "yaml inserts missing intermediate parent",
+			ext:         ".yml",
+			content:     "metadata:\n  name: test\n",
+			dotPath:     `.metadata.annotations["backstage.io/template-version"]`,
+			version:     "1.0.0",
+			wantContent: "metadata:\n  name: test\n  annotations:\n    backstage.io/template-version: 1.0.0\n",
+		},
+		{
+			name:        "yaml inserts intermediate parent after sequence sibling",
+			ext:         ".yml",
+			content:     "metadata:\n  name: test\n  tags:\n    - lz\n    - azure\nspec:\n  owner: team\n",
+			dotPath:     `.metadata.annotations["backstage.io/template-version"]`,
+			version:     "0.1.0",
+			wantContent: "metadata:\n  name: test\n  tags:\n    - lz\n    - azure\n  annotations:\n    backstage.io/template-version: 0.1.0\nspec:\n  owner: team\n",
+		},
+		{
+			name:        "yaml inserts multiple missing intermediate parents",
+			ext:         ".yml",
+			content:     "metadata:\n  name: test\n",
+			dotPath:     "metadata.annotations.deep.version",
+			version:     "2.0.0",
+			wantContent: "metadata:\n  name: test\n  annotations:\n    deep:\n      version: 2.0.0\n",
+		},
+		{
+			name:        "yaml inserts into empty flow mapping",
+			ext:         ".yml",
+			content:     "metadata: {}\n",
+			dotPath:     "metadata.version",
+			version:     "1.0.0",
+			wantContent: "metadata:\n  version: 1.0.0\n",
+		},
+		{
+			name:        "yaml inserts missing parent at top level",
+			ext:         ".yml",
+			content:     "name: test\n",
+			dotPath:     "metadata.version",
+			version:     "1.0.0",
+			wantContent: "name: test\nmetadata:\n  version: 1.0.0\n",
+		},
+		{
+			name:        "json inserts missing intermediate parent",
+			ext:         ".json",
+			content:     `{"metadata": {"name": "test"}}`,
+			dotPath:     `metadata.annotations.version`,
+			version:     "1.0.0",
+			wantContent: `{"metadata": {"name": "test", "annotations": {"version": "1.0.0"}}}`,
+		},
+		{
+			name:        "yaml with document separator",
+			ext:         ".yml",
+			content:     "---\nversion: 1.0.0\nname: test\n",
+			dotPath:     "version",
+			version:     "2.0.0",
+			wantContent: "---\nversion: 2.0.0\nname: test\n",
+		},
+		{
+			name:        "yaml version with v-prefix round-trip",
+			ext:         ".yml",
+			content:     "version: v1.0.0\n",
+			dotPath:     "version",
+			version:     "v2.0.0",
+			wantContent: "version: v2.0.0\n",
 		},
 	}
 
@@ -397,6 +595,172 @@ func TestWriteVersionToFile(t *testing.T) {
 			}
 			if got.Original() != tt.version {
 				t.Errorf("after write, version = %v, want %v", got.Original(), tt.version)
+			}
+
+			if tt.wantContent != "" {
+				written, err := os.ReadFile(fpath)
+				if err != nil {
+					t.Fatalf("reading file after write: %v", err)
+				}
+				if string(written) != tt.wantContent {
+					t.Errorf("file content mismatch.\ngot:\n%s\nwant:\n%s", string(written), tt.wantContent)
+				}
+			}
+		})
+	}
+}
+
+// ---- findYAMLValueOffset tests ----
+
+func TestFindYAMLValueOffset(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		content  string
+		segments []string
+		wantStr  string
+		wantErr  bool
+	}{
+		{
+			name:     "simple unquoted",
+			content:  "version: 1.0.0\n",
+			segments: []string{"version"},
+			wantStr:  "1.0.0",
+		},
+		{
+			name:     "double quoted",
+			content:  "version: \"1.0.0\"\n",
+			segments: []string{"version"},
+			wantStr:  "1.0.0",
+		},
+		{
+			name:     "single quoted",
+			content:  "version: '1.0.0'\n",
+			segments: []string{"version"},
+			wantStr:  "1.0.0",
+		},
+		{
+			name:     "nested",
+			content:  "metadata:\n  version: 2.0.0\n",
+			segments: []string{"metadata", "version"},
+			wantStr:  "2.0.0",
+		},
+		{
+			name:     "missing key",
+			content:  "other: 1.0.0\n",
+			segments: []string{"version"},
+			wantErr:  true,
+		},
+		{
+			name:     "double quoted with escape",
+			content:  "desc: \"line1\\nline2\"\n",
+			segments: []string{"desc"},
+			wantStr:  "line1\\nline2",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			content := []byte(tt.content)
+			start, end, err := findYAMLValueOffset(content, tt.segments)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("findYAMLValueOffset() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			got := string(content[start:end])
+			if got != tt.wantStr {
+				t.Errorf("findYAMLValueOffset() extracted %q, want %q", got, tt.wantStr)
+			}
+		})
+	}
+}
+
+// ---- findJSONValueOffset tests ----
+
+func TestFindJSONValueOffset(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		content  string
+		segments []string
+		wantStr  string
+		wantErr  bool
+	}{
+		{
+			name:     "simple",
+			content:  `{"version": "1.0.0"}`,
+			segments: []string{"version"},
+			wantStr:  "1.0.0",
+		},
+		{
+			name:     "nested",
+			content:  `{"metadata": {"version": "2.0.0"}}`,
+			segments: []string{"metadata", "version"},
+			wantStr:  "2.0.0",
+		},
+		{
+			name:     "skips non-matching keys",
+			content:  `{"name": "1.0.0", "version": "2.0.0", "desc": "x"}`,
+			segments: []string{"version"},
+			wantStr:  "2.0.0",
+		},
+		{
+			name:     "missing key",
+			content:  `{"other": "1.0.0"}`,
+			segments: []string{"version"},
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			content := []byte(tt.content)
+			start, end, err := findJSONValueOffset(content, tt.segments)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("findJSONValueOffset() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+			got := string(content[start:end])
+			if got != tt.wantStr {
+				t.Errorf("findJSONValueOffset() extracted %q, want %q", got, tt.wantStr)
+			}
+		})
+	}
+}
+
+// ---- lineColumnToOffset tests ----
+
+func TestLineColumnToOffset(t *testing.T) {
+	t.Parallel()
+	content := []byte("abc\ndef\nghi\n")
+	tests := []struct {
+		name string
+		line int
+		col  int
+		want int
+	}{
+		{"line 1 col 1", 1, 1, 0},
+		{"line 1 col 3", 1, 3, 2},
+		{"line 2 col 1", 2, 1, 4},
+		{"line 3 col 2", 3, 2, 9},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := lineColumnToOffset(content, tt.line, tt.col)
+			if got != tt.want {
+				t.Errorf("lineColumnToOffset(line=%d, col=%d) = %d, want %d", tt.line, tt.col, got, tt.want)
 			}
 		})
 	}
@@ -489,5 +853,108 @@ func TestFindComponents_EmptyConfig(t *testing.T) {
 	_, err := proc.FindComponents(t.TempDir(), MonorepoConfig{})
 	if err == nil {
 		t.Error("FindComponents() expected error for empty config, got nil")
+	}
+}
+
+func TestFindComponents_MissingVersionKey(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, "templates", "nokey")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// File exists but doesn't have the version annotation.
+	content := "metadata:\n  annotations:\n    other-key: value\n"
+	if err := os.WriteFile(filepath.Join(dir, "template.yml"), []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := MonorepoConfig{
+		VersioningFile: "templates/*/template.yml",
+		Path:           `.metadata.annotations["backstage.io/template-version"]`,
+	}
+
+	proc := NewMonorepoProcessor()
+	components, err := proc.FindComponents(root, cfg)
+	if err != nil {
+		t.Fatalf("FindComponents() error = %v, want nil (should default to 0.0.0)", err)
+	}
+	if len(components) != 1 {
+		t.Fatalf("FindComponents() returned %d components, want 1", len(components))
+	}
+	if components[0].CurrentVersion.Original() != "0.0.0" {
+		t.Errorf("component version = %v, want 0.0.0", components[0].CurrentVersion.Original())
+	}
+	if !components[0].VersionKeyMissing {
+		t.Error("component VersionKeyMissing = false, want true")
+	}
+}
+
+// TestWriteVersionToFile_PreservesPermissions verifies that writeVersionToFile
+// does not clobber the original file's permission bits.
+func TestWriteVersionToFile_PreservesPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file permission bits are not meaningful on Windows")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	fpath := filepath.Join(dir, "test.yml")
+	if err := os.WriteFile(fpath, []byte("version: 1.0.0\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeVersionToFile(fpath, "version", "2.0.0"); err != nil {
+		t.Fatalf("writeVersionToFile() error = %v", err)
+	}
+
+	fi, err := os.Stat(fpath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := fi.Mode().Perm(); perm != 0644 {
+		t.Errorf("file permissions after write = %o, want 0644", perm)
+	}
+}
+
+// TestInsertYAMLKey_EmptyMapping verifies that insertYAMLKey handles
+// an empty flow mapping by converting it to block style.
+func TestInsertYAMLKey_EmptyMapping(t *testing.T) {
+	t.Parallel()
+	content := []byte("metadata: {}\n")
+	result, err := insertYAMLKey(content, []string{"metadata", "version"}, "1.0.0")
+	if err != nil {
+		t.Fatalf("insertYAMLKey() unexpected error: %v", err)
+	}
+	want := "metadata:\n  version: 1.0.0\n"
+	if string(result) != want {
+		t.Errorf("insertYAMLKey() =\n%s\nwant:\n%s", result, want)
+	}
+}
+
+// TestFindComponents_CorruptYAML verifies that corrupt YAML files propagate as
+// errors instead of being silently treated as missing-key.
+func TestFindComponents_CorruptYAML(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	dir := filepath.Join(root, "templates", "bad")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "template.yml"), []byte(":\n  :\n[broken"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := MonorepoConfig{
+		VersioningFile: "templates/*/template.yml",
+		Path:           "version",
+	}
+
+	proc := NewMonorepoProcessor()
+	_, err := proc.FindComponents(root, cfg)
+	if err == nil {
+		t.Error("FindComponents() expected error for corrupt YAML, got nil")
 	}
 }

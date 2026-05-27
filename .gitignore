@@ -24,3 +24,6 @@ artifacts/
 
 # Claude Code local state
 .claude/
+
+# Editor settings
+.vscode/

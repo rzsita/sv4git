@@ -537,6 +537,7 @@ func monorepoNextVersionHandler(
 			return fmt.Errorf("error finding monorepo components: %v", err)
 		}
 
+		prefix := cfg.Monorepo.VersionPrefix
 		for _, component := range components {
 			baseVer, commits, cerr := componentBaseVersionAndCommits(git, repoPath, component, cfg.Monorepo.Path)
 			if cerr != nil {
@@ -547,7 +548,7 @@ func monorepoNextVersionHandler(
 			if !updated {
 				nextVer = baseVer
 			}
-			fmt.Printf("%s: %s\n", component.Name, nextVer.String())
+			fmt.Printf("%s: %s\n", component.Name, prefix+nextVer.String())
 		}
 		return nil
 	}
@@ -566,6 +567,9 @@ func monorepoTagHandler(
 			return fmt.Errorf("error finding monorepo components: %v", err)
 		}
 
+		prefix := cfg.Monorepo.VersionPrefix
+		minVer, _ := semver.NewVersion("0.1.0")
+
 		for _, component := range components {
 			commits, cerr := componentCommits(git, repoPath, component)
 			if cerr != nil {
@@ -573,9 +577,14 @@ func monorepoTagHandler(
 			}
 
 			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
-			if !updated {
-				fmt.Printf("%s: no version change (current: %s)\n", component.Name, component.CurrentVersion.String())
+			if !updated && !component.VersionKeyMissing {
+				fmt.Printf("%s: no version change (current: %s)\n", component.Name, prefix+component.CurrentVersion.String())
 				continue
+			}
+
+			// For brand-new components (version key missing), ensure minimum 0.1.0.
+			if component.VersionKeyMissing && (nextVer == nil || nextVer.LessThan(minVer)) {
+				nextVer = minVer
 			}
 
 			if uerr := monorepoProcessor.UpdateVersion(component, *nextVer, cfg.Monorepo); uerr != nil {
@@ -609,6 +618,9 @@ func monorepoUpdateVersionHandler(
 			return fmt.Errorf("error finding monorepo components: %v", err)
 		}
 
+		prefix := cfg.Monorepo.VersionPrefix
+		minVer, _ := semver.NewVersion("0.1.0")
+
 		for _, component := range components {
 			baseVer, commits, cerr := componentBaseVersionAndCommits(git, repoPath, component, cfg.Monorepo.Path)
 			if cerr != nil {
@@ -616,20 +628,25 @@ func monorepoUpdateVersionHandler(
 			}
 
 			nextVer, updated := semverProcessor.NextVersion(baseVer, commits)
-			if !updated {
-				fmt.Printf("%s: no version change (current: %s)\n", component.Name, baseVer.String())
+			if !updated && !component.VersionKeyMissing {
+				fmt.Printf("%s: no version change (current: %s)\n", component.Name, prefix+baseVer.String())
 				continue
 			}
 
+			// For brand-new components (version key missing), ensure minimum 0.1.0.
+			if component.VersionKeyMissing && (nextVer == nil || nextVer.LessThan(minVer)) {
+				nextVer = minVer
+			}
+
 			if nextVer.Equal(component.CurrentVersion) {
-				fmt.Printf("%s: already at %s\n", component.Name, component.CurrentVersion.String())
+				fmt.Printf("%s: already at %s\n", component.Name, prefix+component.CurrentVersion.String())
 				continue
 			}
 
 			if uerr := monorepoProcessor.UpdateVersion(component, *nextVer, cfg.Monorepo); uerr != nil {
 				return fmt.Errorf("error updating version for %s: %v", component.Name, uerr)
 			}
-			fmt.Printf("%s: %s written to %s\n", component.Name, nextVer.String(), component.VersioningFilePath)
+			fmt.Printf("%s: %s written to %s\n", component.Name, prefix+nextVer.String(), component.VersioningFilePath)
 		}
 		return nil
 	}
