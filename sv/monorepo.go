@@ -741,9 +741,7 @@ func jsonEnsureParent(content []byte, parentSegments []string, depth int) (bool,
 	}
 
 	// Missing — insert `"seg": {}` into this object.
-	hasEntries := true // we iterated past entries to reach here
-	// Re-check: if dec.More() was false from the start, hasEntries is false.
-	// Re-scan to determine hasEntries.
+	// Re-scan to determine whether this object already has entries.
 	dec2 := json.NewDecoder(bytes.NewReader(content))
 	dec2.UseNumber()
 	for i := 0; i < depth; i++ {
@@ -751,7 +749,7 @@ func jsonEnsureParent(content []byte, parentSegments []string, depth int) (bool,
 		_ = jsonSeekKey(dec2, parentSegments[i])
 	}
 	_ = jsonEnterObject(dec2)
-	hasEntries = dec2.More()
+	hasEntries := dec2.More()
 	// Skip to end.
 	for dec2.More() {
 		if _, err := dec2.Token(); err != nil {
