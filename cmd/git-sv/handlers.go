@@ -745,23 +745,6 @@ func monorepoChangelogHandler(
 	}
 }
 
-// componentCommits returns commits that touched the component's directory since the
-// last Go-style component tag (e.g. "templates/my-component/v1.2.3").
-// Falls back to all directory commits when no component tag exists yet (first run).
-//
-// NOTE: monorepoTagHandler previously used this function, but now uses
-// componentBaseVersionAndCommits to prevent a double-bump when called after a
-// prepare-release step has already advanced the file version ahead of the last tag.
-func componentCommits(g sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
-	relDir, err := filepath.Rel(repoPath, component.RootPath)
-	if err != nil {
-		return nil, err
-	}
-	lastTag := g.LastComponentTag(relDir)
-	lr := sv.NewLogRangeWithPaths(sv.TagRange, lastTag, "", []string{relDir})
-	return g.Log(lr)
-}
-
 // componentBaseVersionAndCommits returns the anchored base version and the commits
 // since that baseline for use in monorepo-bump calculations.
 //
