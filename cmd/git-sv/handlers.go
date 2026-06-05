@@ -571,12 +571,16 @@ func monorepoTagHandler(
 		minVer, _ := semver.NewVersion("0.1.0")
 
 		for _, component := range components {
-			commits, cerr := componentCommits(git, repoPath, component)
+			// Use componentBaseVersionAndCommits so the base version is anchored to the
+			// last git tag rather than the on-disk file. This prevents a double-bump when
+			// monorepo-tag is called after a prepare-release commit has already bumped the
+			// versioning file (file version > last tag version).
+			baseVer, commits, cerr := componentBaseVersionAndCommits(git, repoPath, component, cfg.Monorepo.Path)
 			if cerr != nil {
 				return fmt.Errorf("error getting commits for %s: %v", component.Name, cerr)
 			}
 
-			nextVer, updated := monorepoProcessor.NextVersion(component, commits, semverProcessor)
+			nextVer, updated := semverProcessor.NextVersion(baseVer, commits)
 			if !updated && !component.VersionKeyMissing {
 				fmt.Printf("%s: no version change (current: %s)\n", component.Name, prefix+component.CurrentVersion.String())
 				continue
@@ -739,25 +743,6 @@ func monorepoChangelogHandler(
 		}
 		return nil
 	}
-}
-
-// componentCommits returns commits that touched the component's directory since the
-// last Go-style component tag (e.g. "templates/my-component/v1.2.3").
-// Falls back to all directory commits when no component tag exists yet (first run).
-//
-// Used exclusively by monorepoTagHandler. The simpler last-tag baseline is correct
-// there because monorepo-tag always creates a new tag immediately after bumping —
-// so the on-disk version is never "ahead" of the committed baseline. Commands that
-// may run after a monorepo-bump (where the file is bumped but not yet tagged) must
-// use componentBaseVersionAndCommits instead to maintain idempotency.
-func componentCommits(g sv.Git, repoPath string, component sv.MonorepoComponent) ([]sv.GitCommitLog, error) {
-	relDir, err := filepath.Rel(repoPath, component.RootPath)
-	if err != nil {
-		return nil, err
-	}
-	lastTag := g.LastComponentTag(relDir)
-	lr := sv.NewLogRangeWithPaths(sv.TagRange, lastTag, "", []string{relDir})
-	return g.Log(lr)
 }
 
 // componentBaseVersionAndCommits returns the anchored base version and the commits

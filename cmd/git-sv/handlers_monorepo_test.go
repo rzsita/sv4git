@@ -202,11 +202,8 @@ func Test_monorepoTagHandler_SkipsNoUpdate(t *testing.T) {
 		findComponentsFn: func(string, sv.MonorepoConfig) ([]sv.MonorepoComponent, error) {
 			return []sv.MonorepoComponent{comp}, nil
 		},
-		nextVersionFn: func(component sv.MonorepoComponent, _ []sv.GitCommitLog, _ sv.SemVerCommitsProcessor) (*semver.Version, bool) {
-			return component.CurrentVersion, false // no update
-		},
 	}
-	semverProc := mockSemVerProcessor{}
+	semverProc := mockSemVerProcessor{} // nil nextVersionFn → returns (version, false)
 	cfg := Config{}
 
 	handler := monorepoTagHandler(git, semverProc, mnrp, cfg, comp.RootPath)
@@ -240,15 +237,17 @@ func Test_monorepoTagHandler_UpdatesAndTags(t *testing.T) {
 		findComponentsFn: func(string, sv.MonorepoConfig) ([]sv.MonorepoComponent, error) {
 			return []sv.MonorepoComponent{comp}, nil
 		},
-		nextVersionFn: func(_ sv.MonorepoComponent, _ []sv.GitCommitLog, _ sv.SemVerCommitsProcessor) (*semver.Version, bool) {
-			return nextVer, true
-		},
 		updateVersionFn: func(_ sv.MonorepoComponent, version semver.Version, _ sv.MonorepoConfig) error {
 			updatedVersion = version
 			return nil
 		},
 	}
-	semverProc := mockSemVerProcessor{}
+	// semverProc controls the version bump (now called directly instead of via monorepoProcessor.NextVersion).
+	semverProc := mockSemVerProcessor{
+		nextVersionFn: func(_ *semver.Version, _ []sv.GitCommitLog) (*semver.Version, bool) {
+			return nextVer, true
+		},
+	}
 	cfg := Config{}
 
 	handler := monorepoTagHandler(git, semverProc, mnrp, cfg, repoRoot)
@@ -260,6 +259,65 @@ func Test_monorepoTagHandler_UpdatesAndTags(t *testing.T) {
 	}
 	if !strings.HasSuffix(createdTag, "v3.1.0") {
 		t.Errorf("TagForComponent tag = %q, want suffix v3.1.0", createdTag)
+	}
+}
+
+// Test_monorepoTagHandler_IdempotentAfterPrepare verifies that monorepo-tag produces the
+// correct version when called after a prepare-release commit has already bumped the
+// versioning file ahead of the last git tag (the real-world two-step pipeline flow).
+//
+// Setup: file=v0.6.0 (bumped by prepare-release), last tag=v0.5.0, one feat commit since tag.
+// Expected: tag at v0.6.0 — NOT v0.7.0 (which the old file-based approach would produce).
+func Test_monorepoTagHandler_IdempotentAfterPrepare(t *testing.T) {
+	repoRoot := t.TempDir()
+	comp := makeComponent(t, "ice-k8s-viv-template", "0.6.0") // file bumped by prepare-release
+	comp.RootPath = filepath.Join(repoRoot, "ice-k8s-viv-template")
+	if err := os.MkdirAll(comp.RootPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	var createdTagVersion string
+
+	// Simulate: last tag exists at v0.5.0 for this component.
+	lastTag := "templates/ice-k8s-viv-template/v0.5.0"
+	git := mockGit{
+		lastComponentTagFn: func(string) string { return lastTag },
+		logFn: func(lr sv.LogRange) ([]sv.GitCommitLog, error) {
+			// One feat commit since the last tag (the one that triggered the bump).
+			return []sv.GitCommitLog{{Hash: "feat-abc", Message: sv.CommitMessage{Type: "feat", Description: "add requester field"}}}, nil
+		},
+		tagForComponentFn: func(version semver.Version, componentPath string) (string, error) {
+			createdTagVersion = version.String()
+			return componentPath + "/v" + version.String(), nil
+		},
+	}
+	mnrp := mockMonorepoProcessor{
+		findComponentsFn: func(string, sv.MonorepoConfig) ([]sv.MonorepoComponent, error) {
+			return []sv.MonorepoComponent{comp}, nil
+		},
+		updateVersionFn: func(_ sv.MonorepoComponent, _ semver.Version, _ sv.MonorepoConfig) error {
+			return nil
+		},
+	}
+	// semverProc: feat commit from base v0.5.0 → v0.6.0 (minor bump).
+	semverProc := mockSemVerProcessor{
+		nextVersionFn: func(base *semver.Version, _ []sv.GitCommitLog) (*semver.Version, bool) {
+			// Verify base is the TAG version (v0.5.0), not the file version (v0.6.0).
+			if base.String() != "0.5.0" {
+				t.Errorf("NextVersion base = %s, want 0.5.0 (last tag); file-based approach would be 0.6.0", base.String())
+			}
+			v := semver.MustParse("0.6.0")
+			return v, true
+		},
+	}
+	cfg := Config{}
+
+	handler := monorepoTagHandler(git, semverProc, mnrp, cfg, repoRoot)
+	if err := handler(newCLICtx()); err != nil {
+		t.Fatalf("monorepoTagHandler() unexpected error: %v", err)
+	}
+	if createdTagVersion != "0.6.0" {
+		t.Errorf("tag version = %s, want 0.6.0 (the old file-based approach would produce 0.7.0)", createdTagVersion)
 	}
 }
 
